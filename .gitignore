@@ -1,0 +1,11 @@
+*.jld2
+*.nc
+*.mp4
+*.gif
+*.png
+*.zarr
+Manifest.toml
+data/
+.CondaPkg/
+CLAUDE.md
+DEVLOG.md

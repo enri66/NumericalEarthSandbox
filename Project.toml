@@ -1,0 +1,14 @@
+[deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+ClimaSeaIce = "6ba0ff68-24e6-4315-936c-2e99227c95a4"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+NumericalEarth = "904d977b-046a-4731-8b86-9235c0d1ef02"
+Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+
+[sources]
+NumericalEarth = {url = "https://github.com/enri66/NumericalEarth.jl.git", rev = "everything"}
+Oceananigans = {url = "https://github.com/enri66/Oceananigans.jl.git", rev = "everything"}
+ClimaSeaIce = {url = "https://github.com/enri66/ClimaSeaIce.jl.git", rev = "widen-oceananigans-compat"}
