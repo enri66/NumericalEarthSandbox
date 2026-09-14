@@ -1,8 +1,9 @@
 # NumericalEarthSandbox
 
-A single environment that combines four in-progress Oceananigans.jl features —
-open-boundary radiation, tracer reservoirs, tides, and low-pass-filtered
-output — with [NumericalEarth.jl](https://github.com/NumericalEarth/NumericalEarth.jl)'s
+A single environment that combines five in-progress Oceananigans.jl features —
+open-boundary radiation, tracer reservoirs, tides, low-pass-filtered output,
+and a split-explicit substep-clock fix — with
+[NumericalEarth.jl](https://github.com/NumericalEarth/NumericalEarth.jl)'s
 realistic regional-ocean machinery (ETOPO bathymetry, GLORYS, ERA5, sea ice),
 so they can be tried together before each lands upstream on its own.
 
@@ -16,9 +17,10 @@ pieces work their way through review:
 | `TracerReservoir` | [CliMA/Oceananigans.jl#5964](https://github.com/CliMA/Oceananigans.jl/pull/5964) |
 | `TidalHarmonics`, `tidal_forcing`, `tidal_boundary_conditions` | [CliMA/Oceananigans.jl#5970](https://github.com/CliMA/Oceananigans.jl/pull/5970) |
 | `LowPassFilter` | [CliMA/Oceananigans.jl#5971](https://github.com/CliMA/Oceananigans.jl/pull/5971) |
+| Split-explicit barotropic substep clock fix | [CliMA/Oceananigans.jl#5982](https://github.com/CliMA/Oceananigans.jl/pull/5982) |
 | `TPXO10Atlas` | [NumericalEarth/NumericalEarth.jl#681](https://github.com/NumericalEarth/NumericalEarth.jl/pull/681) |
 
-The four Oceananigans branches are merged together, conflict-free, at
+The five Oceananigans branches are merged together, conflict-free, at
 [`enri66/Oceananigans.jl#everything`](https://github.com/enri66/Oceananigans.jl/tree/everything).
 [`enri66/NumericalEarth.jl#everything`](https://github.com/enri66/NumericalEarth.jl/tree/everything)
 adds `TPXO10Atlas` and points its own `Oceananigans` dependency at that
