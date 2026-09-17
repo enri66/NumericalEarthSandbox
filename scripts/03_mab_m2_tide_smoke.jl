@@ -296,7 +296,7 @@ grid = ImmersedBoundaryGrid(underlying_grid,
 # ---------------- the shared astronomy ----------------
 # The forcing reads the package astronomy; the analysis below keeps the script version, unchanged,
 # so the skill numbers stay comparable with the earlier runs. The two agree to 0.02° in phase.
-harmonics = TidalHarmonics(start_date; constituents = CONSTITUENTS, ramp_time = ramp)
+harmonics = earth_tidal_harmonics(start_date; constituents = CONSTITUENTS, ramp_time = ramp)
 analysis_harmonics = LocalTides.TidalHarmonics(start_date; constituents = CONSTITUENTS)
 println(harmonics)
 

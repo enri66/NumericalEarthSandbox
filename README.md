@@ -15,10 +15,10 @@ pieces work their way through review:
 |---|---|
 | `ObliqueRadiation` | [CliMA/Oceananigans.jl#5962](https://github.com/CliMA/Oceananigans.jl/pull/5962) |
 | `TracerReservoir` | [CliMA/Oceananigans.jl#5964](https://github.com/CliMA/Oceananigans.jl/pull/5964) |
-| `TidalHarmonics`, `tidal_forcing`, `tidal_boundary_conditions` | [CliMA/Oceananigans.jl#5970](https://github.com/CliMA/Oceananigans.jl/pull/5970) |
+| `TidalHarmonics` (planet-agnostic), `tidal_forcing`, `tidal_boundary_conditions` | [CliMA/Oceananigans.jl#5970](https://github.com/CliMA/Oceananigans.jl/pull/5970) |
 | `LowPassFilter` | [CliMA/Oceananigans.jl#5971](https://github.com/CliMA/Oceananigans.jl/pull/5971) |
 | Split-explicit barotropic substep clock fix | [CliMA/Oceananigans.jl#5982](https://github.com/CliMA/Oceananigans.jl/pull/5982) |
-| `TPXO10Atlas` | [NumericalEarth/NumericalEarth.jl#681](https://github.com/NumericalEarth/NumericalEarth.jl/pull/681) |
+| `TPXO10Atlas`, `earth_tidal_harmonics` (Earth's tidal astronomy) | [NumericalEarth/NumericalEarth.jl#681](https://github.com/NumericalEarth/NumericalEarth.jl/pull/681) |
 
 The five Oceananigans branches are merged together, conflict-free, at
 [`enri66/Oceananigans.jl#everything`](https://github.com/enri66/Oceananigans.jl/tree/everything).
