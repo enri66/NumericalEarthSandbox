@@ -828,6 +828,15 @@ for sid in sort(collect(keys(NOAA_HARCON)))
     push!(gauge_hits, (r.name, i, j, A_n, G_n))
 end
 
+# ---------------- save the analysis products for cross-run comparison ----------------
+# A separate combine script (compare_catke.jl) loads several of these dumps side by side —
+# TPXO/NOAA truth is identical across runs, so only the model fields need saving.
+using Serialization
+serialize(joinpath(OUT_DIR, "$(TAG)_results.jls"),
+         (; TAG, CLOSURE, Cᵇ = CLOSURE == "catke" ? Cᵇ : missing,
+          λc, φc, A_mod, G_mod, A_tpx, G_tpx, valid, wet, H_mod, H_tpx,
+          times, η_store, gauge_hits, start_date, sim_days))
+
 # ---------------- cotidal figure ----------------
 using CairoMakie
 maskland(A) = replace(x -> isfinite(x) ? x : NaN, A)
