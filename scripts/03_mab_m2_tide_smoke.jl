@@ -565,12 +565,12 @@ add_callback!(simulation, report_velocity_spike!, TimeInterval(1hours))
 if get(ENV, "MAB_LOWPASS", "0") == "1"
     η_out = (; η = model.free_surface.displacement)
     simulation.output_writers[:hourly] = JLD2Writer(model, η_out; dir = OUT_DIR, filename = TAG * "_hourly",
-                                                    schedule = TimeInterval(1hours), overwrite_existing = true)
+                                                    schedule = TimeInterval(1hours), overwrite_files = true)
     simulation.output_writers[:daily] = JLD2Writer(model, η_out; dir = OUT_DIR, filename = TAG * "_daily",
-                                                   schedule = LowPassFilter(1days), overwrite_existing = true)
+                                                   schedule = LowPassFilter(1days), overwrite_files = true)
     simulation.output_writers[:pentad] = JLD2Writer(model, η_out; dir = OUT_DIR, filename = TAG * "_pentad",
                                                     schedule = LowPassFilter(5days; window = 10days, cutoff = 10days),
-                                                    overwrite_existing = true)
+                                                    overwrite_files = true)
 end
 
 function progress(sim)
