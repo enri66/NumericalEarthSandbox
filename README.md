@@ -45,23 +45,32 @@ no manual `Pkg.develop` is needed.
 | script | what it does |
 |---|---|
 | `03_mab_m2_tide_smoke.jl` | Mid-Atlantic Bight, M2 tide only: astronomical body force + TPXO10 boundary forcing from one `TidalHarmonics`, so they can't drift out of phase. Harmonically analyses the model's free surface and reports skill against TPXO and against NOAA tide gauges. `MAB_TANGENTIAL=oblique` swaps `ObliqueRadiation` in on the tangential velocity component. |
+| `02_mab_glorys_obc.jl` | Same MAB box, GLORYS-driven open boundaries (Flather/Chapman fed real exterior data instead of zero). Copied from `NumericalEarth/scripts/02_mab_glorys_obc.jl` — keep in sync there, see that repo's `CLAUDE.md` for the fix history. Unlike `03`, this one doesn't need any of the five bundled branches (it only uses mainline NumericalEarth); it's here because this environment is the easiest way to run it without hand-assembling the package combo, not because it's testing an in-progress feature. `MAB_UEXT=native\|masked\|legacy` selects how the Flather barotropic exterior is computed (`native`, the default, is the most precise). |
 
 Its includes (`tidal_harmonics.jl`, `tpxo.jl`, `tpxo_boundaries.jl`,
 `noaa_harcon_mab.jl`, `variable_bottom_drag.jl`,
-`kepsilon_tuple_closure_patch.jl`, `glorys_profiles.jl`) are local helpers,
-not part of either package — the skill-analysis machinery in particular
-(harmonic analysis, atlas readers) is deliberately not something the
-package provides.
+`kepsilon_tuple_closure_patch.jl`, `glorys_profiles.jl`, `glorys_bathymetry.jl`)
+are local helpers, not part of either package — the skill-analysis machinery
+in particular (harmonic analysis, atlas readers) is deliberately not
+something the package provides.
 
-Run with `julia -t 8 --project=. scripts/03_mab_m2_tide_smoke.jl`; see the
-comment block at the top of the script for its environment-variable knobs
-(`MAB_DAYS`, `MAB_NZ`, `MAB_CLOSURE`, `MAB_TANGENTIAL`, ...).
+Run with `julia -t 8 --project=. scripts/03_mab_m2_tide_smoke.jl` or
+`scripts/02_mab_glorys_obc.jl`; see each script's own comment block for its
+environment-variable knobs (`03`: `MAB_DAYS`, `MAB_NZ`, `MAB_CLOSURE`,
+`MAB_TANGENTIAL`, ...; `02`: `MAB_DAYS`, `MAB_UEXT`, `MAB_TANGENTIAL`,
+`MAB_TAU_IN`, `MAB_MATCH_BATHY`, ...).
 
 ### Data
 
 TPXO10-atlas-v2 is licensed and cannot be redistributed here: request it at
 [tpxo.net](https://www.tpxo.net), then point `ENV["TPXO_DIR"]` at the
-unpacked files (default `~/Data/TPXO10_atlas_v2_nc`). Nothing else the
-default smoke test needs requires a download — the NOAA gauge constants
-are inlined, and the optional GLORYS stratification profiles
+unpacked files (default `~/Data/TPXO10_atlas_v2_nc`). Nothing else script
+`03`'s default smoke test needs requires a download — the NOAA gauge
+constants are inlined, and the optional GLORYS stratification profiles
 (`MAB_STRAT=deep`/`shelf`) are off by default.
+
+`02_mab_glorys_obc.jl` defaults `DATA_DIR` to `../NumericalEarth/data`
+(override with `MAB_DATA_DIR`) so it reuses that repo's already-cached
+GLORYS/ETOPO/ERA5 data for the same box and dates, rather than
+re-downloading ~380 MB into a second location. Assumes NumericalEarth is
+checked out as a sibling directory.
