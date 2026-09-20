@@ -55,6 +55,15 @@ are local helpers, not part of either package — the skill-analysis machinery
 in particular (harmonic analysis, atlas readers) is deliberately not
 something the package provides.
 
+Three animation scripts, all reading a run's saved `.jld2` output via
+`MAB_TAG` (copied from/alongside `02`/`04`, same sibling-repo convention as
+above): `animate_ssh.jl` (raw hourly SSH — will visibly carry the tide if
+`04` produced it), `animate_ssh_detided.jl` and `animate_sst_detided.jl`
+(filled-contour SSH/SST from `04`'s `LowPassFilter` daily output —
+`{TAG}_eta_daily.jld2`/`{TAG}_surface_daily.jld2` — so only the days the
+daily filter actually covers, since it needs data on both sides of every
+point: a 14-day run only gets ~9 daily frames, days 3–11).
+
 Run with `julia -t 8 --project=. scripts/03_mab_m2_tide_smoke.jl`,
 `scripts/02_mab_glorys_obc.jl`, or `scripts/04_mab_glorys_tides_reservoirs.jl`;
 see each script's own comment block for its environment-variable knobs
