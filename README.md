@@ -69,6 +69,16 @@ the restart checkpoint was taken far enough before the split (see `04`'s
 comment on this — a 30-day run restarted at day 9 for a day-15 split covers
 the full days 3–27 with no gap, `mab_1month_continuous`).
 
+Plus `snapshot_fields.jl`, a static SST/SSH/surface-speed three-panel PNG at a
+few chosen days (`MAB_SNAPSHOT_DAYS=34,60,87`, default first/middle/last of
+the de-tided record) — faster than scrubbing an animation when spot-checking
+a run. Extended `mab_1month_continuous` to 90 days as `mab_3months`
+(resuming from its day-30 checkpoint, since that's the one with the
+validated-continuous offset — `mab_1month_restart`'s day-12.5 checkpoint
+predates that fix and has a real gap); snapshots at days 34/60/87 show a
+coherent Gulf Stream meandering and shedding rings the whole way, and the
+restart seam checks out clean against the raw hourly record.
+
 Run with `julia -t 8 --project=. scripts/03_mab_m2_tide_smoke.jl`,
 `scripts/02_mab_glorys_obc.jl`, or `scripts/04_mab_glorys_tides_reservoirs.jl`;
 see each script's own comment block for its environment-variable knobs
