@@ -59,11 +59,12 @@ using Dates, Printf, Statistics
 include(joinpath(@__DIR__, "glorys_bathymetry.jl"))
 
 # Copied from ../NumericalEarth/scripts/02_mab_glorys_obc.jl (keep in sync there — see that
-# repo's CLAUDE.md for the session history). Only change from the original: DATA_DIR defaults
-# to NumericalEarth's own cache (sibling repo) instead of a fresh, empty one here, so this
-# doesn't re-download the ~380 MB of GLORYS/ETOPO/ERA5 data that's already sitting there.
-# Override with MAB_DATA_DIR if that layout doesn't hold (e.g. NumericalEarth isn't a sibling).
-const DATA_DIR   = get(ENV, "MAB_DATA_DIR", joinpath(@__DIR__, "..", "..", "NumericalEarth", "data"))
+# repo's CLAUDE.md for the session history). Only change from the original: none anymore — both
+# copies now default DATA_DIR to the same out-of-Dropbox cache (~/Data/NumericalEarth, moved there
+# 2026-09-21; it used to live under NumericalEarth/data/, synced through Dropbox), so this doesn't
+# re-download the several-GB GLORYS/ETOPO/ERA5 data that's already sitting there. Override with
+# MAB_DATA_DIR if that's not where it lives.
+const DATA_DIR   = get(ENV, "MAB_DATA_DIR", joinpath(homedir(), "Data", "NumericalEarth"))
 const resolution = 1 / 12
 const Nz = 40
 

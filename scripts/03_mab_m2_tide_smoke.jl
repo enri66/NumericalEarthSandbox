@@ -562,12 +562,16 @@ add_callback!(simulation, report_velocity_spike!, TimeInterval(1hours))
 
 # Low-pass filtered output (NumericalEarth's LowPassFilter), plus hourly η to check it against.
 # MAB_LOWPASS=1 needs a NumericalEarth that has LowPassFilter (the ~/dev/NumericalEarth.jl branch).
+# Daily uses window=6days, not the 5-day default, so its half-window (3 days) is an exact
+# multiple of the 1-day interval rather than needing `ceil` to round 2.5 up to 3 — see
+# 04_mab_glorys_tides_reservoirs.jl's longer comment on this, and NumericalEarth/CLAUDE.md's
+# mab_1month_continuous session for why it matters after a restart.
 if get(ENV, "MAB_LOWPASS", "0") == "1"
     η_out = (; η = model.free_surface.displacement)
     simulation.output_writers[:hourly] = JLD2Writer(model, η_out; dir = OUT_DIR, filename = TAG * "_hourly",
                                                     schedule = TimeInterval(1hours), overwrite_files = true)
     simulation.output_writers[:daily] = JLD2Writer(model, η_out; dir = OUT_DIR, filename = TAG * "_daily",
-                                                   schedule = LowPassFilter(1days), overwrite_files = true)
+                                                   schedule = LowPassFilter(1days; window = 6days), overwrite_files = true)
     simulation.output_writers[:pentad] = JLD2Writer(model, η_out; dir = OUT_DIR, filename = TAG * "_pentad",
                                                     schedule = LowPassFilter(5days; window = 10days, cutoff = 10days),
                                                     overwrite_files = true)

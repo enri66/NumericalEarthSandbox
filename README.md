@@ -46,7 +46,7 @@ no manual `Pkg.develop` is needed.
 |---|---|
 | `03_mab_m2_tide_smoke.jl` | Mid-Atlantic Bight, M2 tide only: astronomical body force + TPXO10 boundary forcing from one `TidalHarmonics`, so they can't drift out of phase. Harmonically analyses the model's free surface and reports skill against TPXO and against NOAA tide gauges. `MAB_TANGENTIAL=oblique` swaps `ObliqueRadiation` in on the tangential velocity component. |
 | `02_mab_glorys_obc.jl` | Same MAB box, GLORYS-driven open boundaries (Flather/Chapman fed real exterior data instead of zero). Copied from `NumericalEarth/scripts/02_mab_glorys_obc.jl` — keep in sync there, see that repo's `CLAUDE.md` for the fix history. Unlike `03`, this one doesn't need any of the five bundled branches (it only uses mainline NumericalEarth); it's here because this environment is the easiest way to run it without hand-assembling the package combo, not because it's testing an in-progress feature. `MAB_UEXT=native\|masked\|legacy` selects how the Flather barotropic exterior is computed (`native`, the default, is the most precise). |
-| `04_mab_glorys_tides_reservoirs.jl` | `02`'s GLORYS boundaries, but now WITH the M2..Mm tide added on top (additively — see the script's header for why `tidal_boundary_conditions` isn't used directly), `TracerReservoir` on T/S instead of `NormalRadiation`, and `LowPassFilter` de-tided daily/pentad output alongside raw hourly. This one DOES need three of the five bundled branches (`TracerReservoir`, tides, `LowPassFilter`) plus `TPXO10Atlas`, so unlike `02` it can only run here. First validated 2026-09-20 on a 14-day run — see `NumericalEarth/CLAUDE.md`'s session log for the results and the known east-edge spike still worth another look. |
+| `04_mab_glorys_tides_reservoirs.jl` | `02`'s GLORYS boundaries, but now WITH the M2..Mm tide added on top (additively — see the script's header for why `tidal_boundary_conditions` isn't used directly), `TracerReservoir` on T/S instead of `NormalRadiation`, and `LowPassFilter` de-tided daily/pentad output alongside raw hourly. This one DOES need three of the five bundled branches (`TracerReservoir`, tides, `LowPassFilter`) plus `TPXO10Atlas`, so unlike `02` it can only run here. First validated 2026-09-20 on a 14-day run — see `NumericalEarth/CLAUDE.md`'s session log for the results and the known east-edge spike still worth another look. Also supports checkpoint/restart (`MAB_CHECKPOINT_EVERY`, `MAB_PICKUP`) — see the script's own comment above the `Checkpointer` for the offset needed to keep the de-tided output continuous across a restart (validated on a 30-day run, `mab_1month_continuous`, 2026-09-21). |
 
 Its includes (`tidal_harmonics.jl`, `tpxo.jl`, `tpxo_boundaries.jl`,
 `noaa_harcon_mab.jl`, `variable_bottom_drag.jl`,
@@ -55,14 +55,19 @@ are local helpers, not part of either package — the skill-analysis machinery
 in particular (harmonic analysis, atlas readers) is deliberately not
 something the package provides.
 
-Three animation scripts, all reading a run's saved `.jld2` output via
-`MAB_TAG` (copied from/alongside `02`/`04`, same sibling-repo convention as
-above): `animate_ssh.jl` (raw hourly SSH — will visibly carry the tide if
-`04` produced it), `animate_ssh_detided.jl` and `animate_sst_detided.jl`
-(filled-contour SSH/SST from `04`'s `LowPassFilter` daily output —
-`{TAG}_eta_daily.jld2`/`{TAG}_surface_daily.jld2` — so only the days the
-daily filter actually covers, since it needs data on both sides of every
-point: a 14-day run only gets ~9 daily frames, days 3–11).
+Four animation scripts, all reading a run's saved `.jld2` output via
+`MAB_TAG`: `animate_ssh.jl` (raw hourly SSH — will visibly carry the tide if
+`04` produced it), `animate_ssh_detided.jl`, `animate_sst_detided.jl`, and
+`animate_velocity_detided.jl` (filled contours + arrows2d for surface speed
+and direction) — the latter three are filled-contour/vector plots from
+`04`'s `LowPassFilter` daily output (`{TAG}_eta_daily.jld2`/
+`{TAG}_surface_daily.jld2`), so they only cover the days the daily filter
+actually produced valid output for. That span depends on whether/how the run
+was restarted: a single unbroken run only trims ~3 days off each end (a
+14-day run gets days 3–11); a checkpoint/restart run gets a real gap unless
+the restart checkpoint was taken far enough before the split (see `04`'s
+comment on this — a 30-day run restarted at day 9 for a day-15 split covers
+the full days 3–27 with no gap, `mab_1month_continuous`).
 
 Run with `julia -t 8 --project=. scripts/03_mab_m2_tide_smoke.jl`,
 `scripts/02_mab_glorys_obc.jl`, or `scripts/04_mab_glorys_tides_reservoirs.jl`;
@@ -83,7 +88,8 @@ constants are inlined, and the optional GLORYS stratification profiles
 tidal boundary constants.
 
 `02_mab_glorys_obc.jl` and `04_mab_glorys_tides_reservoirs.jl` default
-`DATA_DIR` to `../NumericalEarth/data` (override with `MAB_DATA_DIR`) so
-they reuse that repo's already-cached GLORYS/ETOPO/ERA5 data for the same
-box and dates, rather than re-downloading ~380 MB into a second location.
-Assumes NumericalEarth is checked out as a sibling directory.
+`DATA_DIR` to `~/Data/NumericalEarth` (override with `MAB_DATA_DIR`) — the
+same out-of-Dropbox cache the `NumericalEarth` repo's own scripts use (moved
+there 2026-09-21; it used to live under that repo's `data/`, synced through
+Dropbox), so this doesn't re-download the several-GB GLORYS/ETOPO/ERA5 data
+that's already sitting there.

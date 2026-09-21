@@ -39,8 +39,8 @@ using Dates, Printf, Statistics
 
 include(joinpath(@__DIR__, "glorys_bathymetry.jl"))
 
-# See 02_mab_glorys_obc.jl for why this defaults to NumericalEarth's own data/ cache.
-const DATA_DIR   = get(ENV, "MAB_DATA_DIR", joinpath(@__DIR__, "..", "..", "NumericalEarth", "data"))
+# See 02_mab_glorys_obc.jl for why this defaults to the shared out-of-Dropbox cache.
+const DATA_DIR   = get(ENV, "MAB_DATA_DIR", joinpath(homedir(), "Data", "NumericalEarth"))
 const resolution = 1 / 12
 const Nz = 40
 
@@ -76,6 +76,10 @@ const TPXO_DIR   = get(ENV, "TPXO_DIR", joinpath(homedir(), "Data", "TPXO10_atla
 # tracer reservoirs (MOM6-scale defaults: relax over 20 km on inflow, memoryless on outflow)
 const RESERVOIR_L_IN  = parse(Float64, get(ENV, "MAB_RESERVOIR_L_IN", "20000"))
 const RESERVOIR_L_OUT = parse(Float64, get(ENV, "MAB_RESERVOIR_L_OUT", "0"))
+
+# checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
+# can be a Bool, an iteration number, or a filepath (see the comment there)
+const CHECKPOINT_EVERY = parse(Float64, get(ENV, "MAB_CHECKPOINT_EVERY", "5")) * days
 
 mkpath(DATA_DIR)
 
@@ -384,25 +388,63 @@ save_fields = (u = Field(oc.velocities.u; indices = (:, :, grid.Nz)),
                S = Field(oc.tracers.S;   indices = (:, :, grid.Nz)))
 η_out = (; η = oc.free_surface.displacement)
 
+# Checkpoint/restart. IMPORTANT for the LowPassFilter writers below: nothing about the filter's
+# internal running window is checkpointed (see NumericalEarth/CLAUDE.md's 2026-09-11 evening
+# session), so a run picked up from a checkpoint starts those filters from scratch and needs
+# `window/2` (2.5 days, for the 5-day daily window) of fresh integration before their output is
+# valid again. To keep the daily/pentad output CONTINUOUS across a restart, don't pick up from a
+# checkpoint taken at the exact split time — pick up from one taken `window/2` EARLIER than that,
+# so the filter has rebuilt its window by the time simulated time reaches the split. Concretely:
+# if segment 1 stops at t=S, checkpoint at t=S-2.5days is the one to resume segment 2 from (its
+# valid daily output then starts at (S-2.5days)+2.5days = S, exactly where segment 1's own valid
+# output ends). `MAB_PICKUP`: "false" (default, fresh start) | "true" (latest checkpoint) |
+# an iteration number | a checkpoint filepath.
+checkpoint_dir = isabspath(TAG) ? dirname(TAG) : joinpath(@__DIR__, "..")
+pickup_raw = get(ENV, "MAB_PICKUP", "false")
+PICKUP = pickup_raw == "false" ? false :
+         pickup_raw == "true"  ? true  :
+         occursin(r"^\d+$", pickup_raw) ? parse(Int, pickup_raw) :
+         pickup_raw   # a checkpoint filepath
+
+# A restart wipes and restarts every writer's file unless told not to — `!fresh_start` keeps
+# a picked-up run's earlier segment instead of overwriting it.
+fresh_start = PICKUP == false
+
 # Raw (tidal) hourly output for the SSH animation, plus de-tided daily/pentad output
-# (LowPassFilter — see NumericalEarth/CLAUDE.md's 2026-09-11 evening session for the
-# 5-day-window/40h-cutoff daily + 10-day-window/10-day-cutoff pentad spec this reuses).
+# (LowPassFilter — see NumericalEarth/CLAUDE.md's 2026-09-11 evening session for the original
+# 5-day-window/40h-cutoff daily + 10-day-window/10-day-cutoff pentad spec).
+#
+# Daily uses window=6days (not Oceananigans' own 5-day default) so its half-window (3 days) is
+# an EXACT multiple of the 1-day interval: `LowPassFilter`'s first-valid-frame time is
+# `ceil(Int, (t + window/2) / interval) * interval` (see low_pass_filter.jl) — with the 5-day
+# default that's `ceil(2.5) = 3`, a day later than the naive `window/2 = 2.5`; with 6 days it's
+# `ceil(3) = 3` too (same first frame, same 2×3=6-day restart-continuity offset — see
+# NumericalEarth/CLAUDE.md's mab_1month_continuous session), but now by exact arithmetic rather
+# than a rounding coincidence. Cutoff (40h default) is unchanged, so what gets filtered out
+# doesn't change, just a slightly wider Lanczos taper. Scoped to our own calls, not a change to
+# Oceananigans' own default. Pentad's window=10days/interval=5days is already exact
+# (half-window 5 = 1×interval) and doesn't need this.
 simulation.output_writers[:surface] = JLD2Writer(oc, save_fields;
-    filename = outfile, schedule = TimeInterval(3hours), overwrite_files = true)
+    filename = outfile, schedule = TimeInterval(3hours), overwrite_files = fresh_start)
 simulation.output_writers[:surface_daily] = JLD2Writer(oc, save_fields;
     filename = joinpath(@__DIR__, "..", TAG * "_surface_daily.jld2"),
-    schedule = LowPassFilter(1days), overwrite_files = true)
+    schedule = LowPassFilter(1days; window = 6days), overwrite_files = fresh_start)
 simulation.output_writers[:eta] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta.jld2"),
-    schedule = TimeInterval(1hours), overwrite_files = true)
+    schedule = TimeInterval(1hours), overwrite_files = fresh_start)
 simulation.output_writers[:eta_daily] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta_daily.jld2"),
-    schedule = LowPassFilter(1days), overwrite_files = true)
+    schedule = LowPassFilter(1days; window = 6days), overwrite_files = fresh_start)
 simulation.output_writers[:eta_pentad] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta_pentad.jld2"),
-    schedule = LowPassFilter(5days; window = 10days, cutoff = 10days), overwrite_files = true)
+    schedule = LowPassFilter(5days; window = 10days, cutoff = 10days), overwrite_files = fresh_start)
+
+simulation.output_writers[:checkpointer] = Checkpointer(model;
+    schedule = TimeInterval(CHECKPOINT_EVERY), dir = checkpoint_dir,
+    prefix = basename(TAG) * "_checkpoint", overwrite_files = false, cleanup = false)
 
 @info "running: tangential=$TANGENTIAL  Uᵉˣᵗ=$UEXT_MODE  τ_in=$(TAU_IN/86400) day(s)  " *
-      "tides=$(join(TIDE_CONSTITUENTS, ",")) reservoir(L_in=$RESERVOIR_L_IN, L_out=$RESERVOIR_L_OUT)  $(sim_days) days"
-run!(simulation)
+      "tides=$(join(TIDE_CONSTITUENTS, ",")) reservoir(L_in=$RESERVOIR_L_IN, L_out=$RESERVOIR_L_OUT)  " *
+      "$(sim_days) days  pickup=$PICKUP"
+run!(simulation; pickup = PICKUP, checkpoint_at_end = true)
 println("\n✅ done — $(TAG)")
