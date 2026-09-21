@@ -386,6 +386,8 @@ save_fields = (u = Field(oc.velocities.u; indices = (:, :, grid.Nz)),
                v = Field(oc.velocities.v; indices = (:, :, grid.Nz)),
                T = Field(oc.tracers.T;   indices = (:, :, grid.Nz)),
                S = Field(oc.tracers.S;   indices = (:, :, grid.Nz)))
+volume_fields = (u = oc.velocities.u, v = oc.velocities.v, w = oc.velocities.w,
+                 T = oc.tracers.T, S = oc.tracers.S)
 η_out = (; η = oc.free_surface.displacement)
 
 # Checkpoint/restart. IMPORTANT for the LowPassFilter writers below: nothing about the filter's
@@ -428,6 +430,12 @@ simulation.output_writers[:surface] = JLD2Writer(oc, save_fields;
     filename = outfile, schedule = TimeInterval(3hours), overwrite_files = fresh_start)
 simulation.output_writers[:surface_daily] = JLD2Writer(oc, save_fields;
     filename = joinpath(@__DIR__, "..", TAG * "_surface_daily.jld2"),
+    schedule = LowPassFilter(1days; window = 6days), overwrite_files = fresh_start)
+# Full-depth u/v/T/S, same de-tided daily cadence as surface_daily — for transects and other
+# uses that need more than the top level (e.g. plot_temperature_transects.jl, which otherwise
+# has to fall back to pulling a full 3D snapshot out of a checkpoint instead).
+simulation.output_writers[:volume_daily] = JLD2Writer(oc, volume_fields;
+    filename = joinpath(@__DIR__, "..", TAG * "_volume_daily.jld2"),
     schedule = LowPassFilter(1days; window = 6days), overwrite_files = fresh_start)
 simulation.output_writers[:eta] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta.jld2"),
