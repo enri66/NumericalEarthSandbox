@@ -32,7 +32,7 @@ using CopernicusClimateDataStore    # activates the ERA5 download backend
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: ExponentialDiscretization, znodes, λnodes, φnodes
-using Oceananigans.BoundaryConditions: PerturbationAdvection, NormalRadiation, TracerReservoir,
+using Oceananigans.BoundaryConditions: PerturbationAdvection, NormalRadiation, ObliqueRadiation, TracerReservoir,
                                        GravityWaveRadiationBoundaryCondition,
                                        SurfaceWaveRadiationBoundaryCondition
 using Dates, Printf, Statistics
@@ -76,6 +76,8 @@ const TPXO_DIR   = get(ENV, "TPXO_DIR", joinpath(homedir(), "Data", "TPXO10_atla
 # tracer reservoirs (MOM6-scale defaults: relax over 20 km on inflow, memoryless on outflow)
 const RESERVOIR_L_IN  = parse(Float64, get(ENV, "MAB_RESERVOIR_L_IN", "20000"))
 const RESERVOIR_L_OUT = parse(Float64, get(ENV, "MAB_RESERVOIR_L_OUT", "0"))
+# T/S open-boundary scheme: "reservoir" (default), "radiation" (NormalRadiation, as script 02) or "oblique"
+const TRACER_SCHEME = get(ENV, "MAB_TRACER_SCHEME", "reservoir")
 
 # checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
 # can be a Bool, an iteration number, or a filepath (see the comment there)
@@ -288,7 +290,10 @@ end
 # ---------------- the boundary conditions ----------------
 normal_scheme  = PerturbationAdvection(inflow_timescale = TAU_IN, outflow_timescale = Inf)
 tangential_sch = NormalRadiation(inflow_timescale = TAU_IN, outflow_timescale = Inf)
-tracer_scheme  = TracerReservoir(inflow_length_scale = RESERVOIR_L_IN, outflow_length_scale = RESERVOIR_L_OUT)
+tracer_scheme  = TRACER_SCHEME == "reservoir" ? TracerReservoir(inflow_length_scale = RESERVOIR_L_IN, outflow_length_scale = RESERVOIR_L_OUT) :
+                 TRACER_SCHEME == "radiation" ? NormalRadiation(inflow_timescale = TAU_IN, outflow_timescale = Inf) :
+                 TRACER_SCHEME == "oblique"   ? ObliqueRadiation(inflow_timescale = TAU_IN, outflow_timescale = Inf) :
+                 error("MAB_TRACER_SCHEME must be reservoir, radiation or oblique, got $TRACER_SCHEME")
 
 tangential(fts) = TANGENTIAL == "prescribed" ?
     ValueBoundaryCondition(Interpolated(fts)) :
@@ -452,7 +457,7 @@ simulation.output_writers[:checkpointer] = Checkpointer(model;
     prefix = basename(TAG) * "_checkpoint", overwrite_files = false, cleanup = false)
 
 @info "running: tangential=$TANGENTIAL  Uᵉˣᵗ=$UEXT_MODE  τ_in=$(TAU_IN/86400) day(s)  " *
-      "tides=$(join(TIDE_CONSTITUENTS, ",")) reservoir(L_in=$RESERVOIR_L_IN, L_out=$RESERVOIR_L_OUT)  " *
+      "tides=$(join(TIDE_CONSTITUENTS, ",")) tracers=$TRACER_SCHEME reservoir(L_in=$RESERVOIR_L_IN, L_out=$RESERVOIR_L_OUT)  " *
       "$(sim_days) days  pickup=$PICKUP"
 run!(simulation; pickup = PICKUP, checkpoint_at_end = true)
 println("\n✅ done — $(TAG)")
