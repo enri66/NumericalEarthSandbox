@@ -78,6 +78,9 @@ const RESERVOIR_L_IN  = parse(Float64, get(ENV, "MAB_RESERVOIR_L_IN", "20000"))
 const RESERVOIR_L_OUT = parse(Float64, get(ENV, "MAB_RESERVOIR_L_OUT", "0"))
 # T/S open-boundary scheme: "reservoir" (default), "radiation" (NormalRadiation, as script 02) or "oblique"
 const TRACER_SCHEME = get(ENV, "MAB_TRACER_SCHEME", "reservoir")
+# "true": make the 3D normal velocity at each open face integrate to the barotropic exterior transport
+# used by the Flather condition (see ConsistentNormalFlow below)
+const CONSISTENT_UBC = get(ENV, "MAB_CONSISTENT_UBC", "false") == "true"
 
 # checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
 # can be a Bool, an iteration number, or a filepath (see the comment there)
@@ -287,6 +290,45 @@ function V_north(i, k, grid, clock, f)
     return (Vs + Vt, ηsub + ηt)
 end
 
+# ---------------- 3D normal velocity consistent with the barotropic exterior (MAB_CONSISTENT_UBC) ----------------
+# The Flather condition drives the barotropic transport toward `U_west/U_east/V_south/V_north` (GLORYS
+# depth mean times the model's wet depth, plus the tide), while the 3D normal velocity is the GLORYS
+# profile interpolated onto the model levels, without the tide. Their depth integrals differ, and in the
+# last interior column that difference appears as a spurious surface vertical velocity. This wrapper adds a
+# depth-uniform velocity to the interpolated profile so that its integral over the wet cells equals the
+# barotropic target exactly.
+import Oceananigans.BoundaryConditions: regularize_boundary_condition, getbc
+
+struct ConsistentNormalFlow{B, U, T}
+    base   :: B   # the Interpolated GLORYS velocity
+    Utotal :: U   # (s, k, grid, clock, fields) -> (barotropic transport, η), as for the Flather functions
+    table  :: T   # times, depth integral of the interpolated profile per time and boundary point, wet depth, floor
+end
+
+regularize_boundary_condition(c::ConsistentNormalFlow, grid, loc, dim, Side, args...) =
+    ConsistentNormalFlow(regularize_boundary_condition(c.base, grid, loc, dim, Side, args...), c.Utotal, c.table)
+
+@inline function getbc(c::ConsistentNormalFlow, s::Integer, k::Integer, grid::Oceananigans.Grids.AbstractGrid, clock = nothing, args...)
+    u = getbc(c.base, s, k, grid, clock, args...)
+    tb = c.table
+    Oceananigans.Grids.znode(1, 1, k, grid, Center(), Center(), Center()) > tb.floor[s] || return u
+    t = isnothing(clock) ? 0.0 : clock.time
+    n1, n2, w = frame(tb.times, t)
+    Uint = (1 - w) * tb.Uint[n1, s] + w * tb.Uint[n2, s]
+    return u + (c.Utotal(s, k, grid, (; time = t), nothing)[1] - Uint) / tb.Hwet[s]
+end
+
+function make_consistency_table(floor_line)
+    Hwet = [sum(Δz_src[k] for k in 1:Nz if zc_src[k] > b; init = 0.0) for b in floor_line]
+    return (; times = collect(fts_u.times), Uint = zeros(length(fts_u.times), length(floor_line)),
+            Hwet, floor = collect(floor_line))
+end
+
+consistency_tables = (u_west  = make_consistency_table(floors[1][1]), u_east  = make_consistency_table(floors[1][2]),
+                      v_south = make_consistency_table(floors[2][1]), v_north = make_consistency_table(floors[2][2]))
+
+normal_condition(fts, Ufun, table) = CONSISTENT_UBC ? ConsistentNormalFlow(Interpolated(fts), Ufun, table) : Interpolated(fts)
+
 # ---------------- the boundary conditions ----------------
 normal_scheme  = PerturbationAdvection(inflow_timescale = TAU_IN, outflow_timescale = Inf)
 tangential_sch = NormalRadiation(inflow_timescale = TAU_IN, outflow_timescale = Inf)
@@ -300,14 +342,14 @@ tangential(fts) = TANGENTIAL == "prescribed" ?
     ValueBoundaryCondition(Interpolated(fts); scheme = tangential_sch)
 
 u_bcs = FieldBoundaryConditions(
-    west  = NormalFlowBoundaryCondition(Interpolated(fts_u); scheme = normal_scheme),
-    east  = NormalFlowBoundaryCondition(Interpolated(fts_u); scheme = normal_scheme),
+    west  = NormalFlowBoundaryCondition(normal_condition(fts_u, U_west, consistency_tables.u_west); scheme = normal_scheme),
+    east  = NormalFlowBoundaryCondition(normal_condition(fts_u, U_east, consistency_tables.u_east); scheme = normal_scheme),
     south = tangential(fts_u),
     north = tangential(fts_u))
 
 v_bcs = FieldBoundaryConditions(
-    south = NormalFlowBoundaryCondition(Interpolated(fts_v); scheme = normal_scheme),
-    north = NormalFlowBoundaryCondition(Interpolated(fts_v); scheme = normal_scheme),
+    south = NormalFlowBoundaryCondition(normal_condition(fts_v, V_south, consistency_tables.v_south); scheme = normal_scheme),
+    north = NormalFlowBoundaryCondition(normal_condition(fts_v, V_north, consistency_tables.v_north); scheme = normal_scheme),
     west  = tangential(fts_v),
     east  = tangential(fts_v))
 
@@ -332,6 +374,28 @@ boundary_conditions = (u = u_bcs, v = v_bcs, T = tracer_bcs(fts_T), S = tracer_b
 
 # ---------------- ocean simulation: GLORYS boundaries + equilibrium tidal body force ----------------
 ocean = ocean_simulation(grid; boundary_conditions, forcing = tidal_forcing(harmonics))
+
+if CONSISTENT_UBC
+    vel = ocean.model.velocities
+    for (bcs, side, name) in ((vel.u.boundary_conditions, :west,  :u_west),  (vel.u.boundary_conditions, :east,  :u_east),
+                              (vel.v.boundary_conditions, :south, :v_south), (vel.v.boundary_conditions, :north, :v_north))
+        c = getproperty(bcs, side).condition
+        c isa ConsistentNormalFlow || error("expected a ConsistentNormalFlow on $name, found $(typeof(c))")
+        tb = consistency_tables[name]
+        for n in eachindex(tb.times), s in eachindex(tb.Hwet)
+            acc = 0.0
+            for k in 1:Nz
+                zc_src[k] > tb.floor[s] || continue
+                acc += Δz_src[k] * getbc(c.base, s, k, ocean.model.grid, (; time = tb.times[n]))
+            end
+            tb.Uint[n, s] = acc
+        end
+        δ = [abs(c.Utotal(s, 1, ocean.model.grid, (; time = 0.0), nothing)[1] - tb.Uint[1, s]) / tb.Hwet[s]
+             for s in eachindex(tb.Hwet) if tb.Hwet[s] > 0]
+        @info @sprintf("consistent normal velocity, %s: depth-uniform correction at t=0 has max %.2e m/s, mean %.2e m/s",
+                       name, maximum(δ), mean(δ))
+    end
+end
 
 set!(ocean.model, MetadataSet(:temperature, :salinity, :u_velocity, :v_velocity;
                               dataset = glorys, date = start_date, dir = DATA_DIR, region))
