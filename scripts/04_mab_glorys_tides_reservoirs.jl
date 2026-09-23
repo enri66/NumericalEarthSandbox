@@ -311,6 +311,7 @@ regularize_boundary_condition(c::ConsistentNormalFlow, grid, loc, dim, Side, arg
 @inline function getbc(c::ConsistentNormalFlow, s::Integer, k::Integer, grid::Oceananigans.Grids.AbstractGrid, clock = nothing, args...)
     u = getbc(c.base, s, k, grid, clock, args...)
     tb = c.table
+    1 <= s <= length(tb.floor) || return u
     Oceananigans.Grids.znode(1, 1, k, grid, Center(), Center(), Center()) > tb.floor[s] || return u
     t = isnothing(clock) ? 0.0 : clock.time
     n1, n2, w = frame(tb.times, t)
@@ -377,20 +378,31 @@ ocean = ocean_simulation(grid; boundary_conditions, forcing = tidal_forcing(harm
 
 if CONSISTENT_UBC
     vel = ocean.model.velocities
-    for (bcs, side, name) in ((vel.u.boundary_conditions, :west,  :u_west),  (vel.u.boundary_conditions, :east,  :u_east),
-                              (vel.v.boundary_conditions, :south, :v_south), (vel.v.boundary_conditions, :north, :v_north))
+    mgrid = ocean.model.grid
+    # (boundary conditions, side, table, source series, normal dimension, boundary face index)
+    faces = ((vel.u.boundary_conditions, :west,  :u_west,  fts_u, 1, 1),
+             (vel.u.boundary_conditions, :east,  :u_east,  fts_u, 1, mgrid.Nx + 1),
+             (vel.v.boundary_conditions, :south, :v_south, fts_v, 2, 1),
+             (vel.v.boundary_conditions, :north, :v_north, fts_v, 2, mgrid.Ny + 1))
+    for (bcs, side, name, fts, dim, iface) in faces
         c = getproperty(bcs, side).condition
         c isa ConsistentNormalFlow || error("expected a ConsistentNormalFlow on $name, found $(typeof(c))")
         tb = consistency_tables[name]
+        # Integrate each source frame exactly as the boundary condition samples it (the same node and
+        # spatial interpolation), from the frame fields themselves: querying the time series at
+        # arbitrary times here would read slices that are not in memory yet.
+        loc = Oceananigans.instantiated_location(fts)
         for n in eachindex(tb.times), s in eachindex(tb.Hwet)
             acc = 0.0
             for k in 1:Nz
                 zc_src[k] > tb.floor[s] || continue
-                acc += Δz_src[k] * getbc(c.base, s, k, ocean.model.grid, (; time = tb.times[n]))
+                X = dim == 1 ? Oceananigans.Grids.node(iface, s, k, mgrid, Face(), Center(), Center()) :
+                               Oceananigans.Grids.node(s, iface, k, mgrid, Center(), Face(), Center())
+                acc += Δz_src[k] * Oceananigans.Fields.interpolate(X, fts[n], loc, fts.grid)
             end
             tb.Uint[n, s] = acc
         end
-        δ = [abs(c.Utotal(s, 1, ocean.model.grid, (; time = 0.0), nothing)[1] - tb.Uint[1, s]) / tb.Hwet[s]
+        δ = [abs(c.Utotal(s, 1, mgrid, (; time = 0.0), nothing)[1] - tb.Uint[1, s]) / tb.Hwet[s]
              for s in eachindex(tb.Hwet) if tb.Hwet[s] > 0]
         @info @sprintf("consistent normal velocity, %s: depth-uniform correction at t=0 has max %.2e m/s, mean %.2e m/s",
                        name, maximum(δ), mean(δ))
