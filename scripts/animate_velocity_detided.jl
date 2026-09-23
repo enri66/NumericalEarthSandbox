@@ -1,4 +1,4 @@
-# De-tided (LowPassFilter daily) surface velocity animation, from a run of
+# De-tided (FilteredTimeInterval daily) surface velocity animation, from a run of
 # 04_mab_glorys_tides_reservoirs.jl: speed as filled contours, direction as
 # subsampled arrows. Usage:
 #   MAB_TAG=mab_glorys_tides_14d julia --project=. animate_velocity_detided.jl

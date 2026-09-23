@@ -18,7 +18,7 @@
 #     corrector.
 #   - `TracerReservoir` (Oceananigans PR #5964) on the T/S boundaries, replacing 02's
 #     `NormalRadiation` tracer scheme.
-#   - `LowPassFilter` (Oceananigans PR #5971) for de-tided daily (and 5-day) SSH and
+#   - `FilteredTimeInterval` (Oceananigans PR #5971) for de-tided daily (and 5-day) SSH and
 #     surface-field output, alongside raw hourly output for animation.
 #
 # Run:  julia -t 8 --project=. scripts/04_mab_glorys_tides_reservoirs.jl
@@ -390,7 +390,7 @@ volume_fields = (u = oc.velocities.u, v = oc.velocities.v, w = oc.velocities.w,
                  T = oc.tracers.T, S = oc.tracers.S)
 η_out = (; η = oc.free_surface.displacement)
 
-# Checkpoint/restart. IMPORTANT for the LowPassFilter writers below: nothing about the filter's
+# Checkpoint/restart. IMPORTANT for the FilteredTimeInterval writers below: nothing about the filter's
 # internal running window is checkpointed (see NumericalEarth/CLAUDE.md's 2026-09-11 evening
 # session), so a run picked up from a checkpoint starts those filters from scratch and needs
 # `window/2` (2.5 days, for the 5-day daily window) of fresh integration before their output is
@@ -413,11 +413,11 @@ PICKUP = pickup_raw == "false" ? false :
 fresh_start = PICKUP == false
 
 # Raw (tidal) hourly output for the SSH animation, plus de-tided daily/pentad output
-# (LowPassFilter — see NumericalEarth/CLAUDE.md's 2026-09-11 evening session for the original
+# (FilteredTimeInterval, then named LowPassFilter — see NumericalEarth/CLAUDE.md's 2026-09-11 evening session for the original
 # 5-day-window/40h-cutoff daily + 10-day-window/10-day-cutoff pentad spec).
 #
 # Daily uses window=6days (not Oceananigans' own 5-day default) so its half-window (3 days) is
-# an EXACT multiple of the 1-day interval: `LowPassFilter`'s first-valid-frame time is
+# an EXACT multiple of the 1-day interval: `FilteredTimeInterval`'s first-valid-frame time is
 # `ceil(Int, (t + window/2) / interval) * interval` (see low_pass_filter.jl) — with the 5-day
 # default that's `ceil(2.5) = 3`, a day later than the naive `window/2 = 2.5`; with 6 days it's
 # `ceil(3) = 3` too (same first frame, same 2×3=6-day restart-continuity offset — see
@@ -430,22 +430,22 @@ simulation.output_writers[:surface] = JLD2Writer(oc, save_fields;
     filename = outfile, schedule = TimeInterval(3hours), overwrite_files = fresh_start)
 simulation.output_writers[:surface_daily] = JLD2Writer(oc, save_fields;
     filename = joinpath(@__DIR__, "..", TAG * "_surface_daily.jld2"),
-    schedule = LowPassFilter(1days; window = 6days), overwrite_files = fresh_start)
+    schedule = FilteredTimeInterval(LanczosKernel(6days; cutoff = 40hours); interval = 1days), overwrite_files = fresh_start)
 # Full-depth u/v/T/S, same de-tided daily cadence as surface_daily — for transects and other
 # uses that need more than the top level (e.g. plot_temperature_transects.jl, which otherwise
 # has to fall back to pulling a full 3D snapshot out of a checkpoint instead).
 simulation.output_writers[:volume_daily] = JLD2Writer(oc, volume_fields;
     filename = joinpath(@__DIR__, "..", TAG * "_volume_daily.jld2"),
-    schedule = LowPassFilter(1days; window = 6days), overwrite_files = fresh_start)
+    schedule = FilteredTimeInterval(LanczosKernel(6days; cutoff = 40hours); interval = 1days), overwrite_files = fresh_start)
 simulation.output_writers[:eta] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta.jld2"),
     schedule = TimeInterval(1hours), overwrite_files = fresh_start)
 simulation.output_writers[:eta_daily] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta_daily.jld2"),
-    schedule = LowPassFilter(1days; window = 6days), overwrite_files = fresh_start)
+    schedule = FilteredTimeInterval(LanczosKernel(6days; cutoff = 40hours); interval = 1days), overwrite_files = fresh_start)
 simulation.output_writers[:eta_pentad] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta_pentad.jld2"),
-    schedule = LowPassFilter(5days; window = 10days, cutoff = 10days), overwrite_files = fresh_start)
+    schedule = FilteredTimeInterval(LanczosKernel(10days; cutoff = 10days); interval = 5days), overwrite_files = fresh_start)
 
 simulation.output_writers[:checkpointer] = Checkpointer(model;
     schedule = TimeInterval(CHECKPOINT_EVERY), dir = checkpoint_dir,

@@ -560,8 +560,8 @@ function report_velocity_spike!(sim)
 end
 add_callback!(simulation, report_velocity_spike!, TimeInterval(1hours))
 
-# Low-pass filtered output (NumericalEarth's LowPassFilter), plus hourly η to check it against.
-# MAB_LOWPASS=1 needs a NumericalEarth that has LowPassFilter (the ~/dev/NumericalEarth.jl branch).
+# Low-pass filtered output (Oceananigans' FilteredTimeInterval), plus hourly η to check it against.
+# MAB_LOWPASS=1 needs an Oceananigans that has FilteredTimeInterval (PR #5971).
 # Daily uses window=6days, not the 5-day default, so its half-window (3 days) is an exact
 # multiple of the 1-day interval rather than needing `ceil` to round 2.5 up to 3 — see
 # 04_mab_glorys_tides_reservoirs.jl's longer comment on this, and NumericalEarth/CLAUDE.md's
@@ -571,9 +571,9 @@ if get(ENV, "MAB_LOWPASS", "0") == "1"
     simulation.output_writers[:hourly] = JLD2Writer(model, η_out; dir = OUT_DIR, filename = TAG * "_hourly",
                                                     schedule = TimeInterval(1hours), overwrite_files = true)
     simulation.output_writers[:daily] = JLD2Writer(model, η_out; dir = OUT_DIR, filename = TAG * "_daily",
-                                                   schedule = LowPassFilter(1days; window = 6days), overwrite_files = true)
+                                                   schedule = FilteredTimeInterval(LanczosKernel(6days; cutoff = 40hours); interval = 1days), overwrite_files = true)
     simulation.output_writers[:pentad] = JLD2Writer(model, η_out; dir = OUT_DIR, filename = TAG * "_pentad",
-                                                    schedule = LowPassFilter(5days; window = 10days, cutoff = 10days),
+                                                    schedule = FilteredTimeInterval(LanczosKernel(10days; cutoff = 10days); interval = 5days),
                                                     overwrite_files = true)
 end
 

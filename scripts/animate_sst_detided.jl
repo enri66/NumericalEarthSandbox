@@ -1,4 +1,4 @@
-# De-tided (LowPassFilter daily) SST animation, contoured, from a run of
+# De-tided (FilteredTimeInterval daily) SST animation, contoured, from a run of
 # 04_mab_glorys_tides_reservoirs.jl.  Usage:
 #   MAB_TAG=mab_glorys_tides_14d julia --project=. animate_sst_detided.jl
 using Oceananigans, CairoMakie, Printf, Statistics, Dates
@@ -33,7 +33,7 @@ levels = range(lo, hi, length = 41)
 lines_levels = range(lo, hi, length = 13)
 
 n = Observable(1)
-ttl = @lift @sprintf("MAB, GLORYS open boundaries + tides — DE-TIDED (LowPassFilter, 1-day) SST   %s",
+ttl = @lift @sprintf("MAB, GLORYS open boundaries + tides — DE-TIDED (low-pass filtered, 1-day) SST   %s",
                      Dates.format(start_date + Second(round(Int, t[$n])), "yyyy-mm-dd"))
 fig = Figure(size = (1400, 1000), fontsize = 20)
 ax = Axis(fig[1, 1], title = ttl, xlabel = "longitude (°E)", ylabel = "latitude (°N)",

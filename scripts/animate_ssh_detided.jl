@@ -1,4 +1,4 @@
-# De-tided (LowPassFilter daily) SSH animation, contoured, from a run of
+# De-tided (FilteredTimeInterval daily) SSH animation, contoured, from a run of
 # 04_mab_glorys_tides_reservoirs.jl.  Usage:
 #   MAB_TAG=mab_glorys_tides_14d julia --project=. animate_ssh_detided.jl
 using Oceananigans, CairoMakie, Printf, Statistics, Dates
@@ -33,7 +33,7 @@ levels = range(-lim, lim, length = 41)
 lines_levels = range(-lim, lim, length = 11)
 
 n = Observable(1)
-ttl = @lift @sprintf("MAB, GLORYS open boundaries + tides — DE-TIDED (LowPassFilter, 1-day) SSH   %s",
+ttl = @lift @sprintf("MAB, GLORYS open boundaries + tides — DE-TIDED (low-pass filtered, 1-day) SSH   %s",
                      Dates.format(start_date + Second(round(Int, t[$n])), "yyyy-mm-dd"))
 fig = Figure(size = (1400, 1000), fontsize = 20)
 ax = Axis(fig[1, 1], title = ttl, xlabel = "longitude (°E)", ylabel = "latitude (°N)",
