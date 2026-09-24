@@ -64,6 +64,10 @@ const TANGENTIAL  = get(ENV, "MAB_TANGENTIAL", "radiated")
 # 3D u/v open-boundary scheme: "oblique" (default, ObliqueRadiation on normal and tangential components)
 # or "legacy" (PerturbationAdvection normal + NormalRadiation tangential, as before 2026-09-24)
 const VELOCITY_SCHEME = get(ENV, "MAB_VELOCITY_SCHEME", "oblique")
+# ObliqueRadiation nudging toward the exterior (GLORYS + tide) and phase-speed averaging weight
+const OBLIQUE_TAU_IN  = parse(Float64, get(ENV, "MAB_OBLIQUE_TAU_IN", "3")) * days
+const OBLIQUE_TAU_OUT = parse(Float64, get(ENV, "MAB_OBLIQUE_TAU_OUT", "360")) * days
+const PHASE_SPEED_WEIGHT = parse(Float64, get(ENV, "MAB_PHASE_SPEED_WEIGHT", "0.3"))
 const TAU_IN      = parse(Float64, get(ENV, "MAB_TAU_IN", "1")) * days
 const TAG         = get(ENV, "MAB_TAG", "mab_glorys_tides")
 const MATCH_BATHY = get(ENV, "MAB_MATCH_BATHY", "true") == "true"
@@ -334,10 +338,12 @@ consistency_tables = (u_west  = make_consistency_table(floors[1][1]), u_east  = 
 normal_condition(fts, Ufun, table) = CONSISTENT_UBC ? ConsistentNormalFlow(Interpolated(fts), Ufun, table) : Interpolated(fts)
 
 # ---------------- the boundary conditions ----------------
-normal_scheme  = VELOCITY_SCHEME == "oblique" ? ObliqueRadiation(inflow_timescale = TAU_IN, outflow_timescale = Inf) :
+oblique_scheme = ObliqueRadiation(inflow_timescale = OBLIQUE_TAU_IN, outflow_timescale = OBLIQUE_TAU_OUT,
+                                  phase_speed_weight = PHASE_SPEED_WEIGHT)
+normal_scheme  = VELOCITY_SCHEME == "oblique" ? oblique_scheme :
                  VELOCITY_SCHEME == "legacy"  ? PerturbationAdvection(inflow_timescale = TAU_IN, outflow_timescale = Inf) :
                  error("MAB_VELOCITY_SCHEME must be oblique or legacy, got $VELOCITY_SCHEME")
-tangential_sch = VELOCITY_SCHEME == "oblique" ? ObliqueRadiation(inflow_timescale = TAU_IN, outflow_timescale = Inf) :
+tangential_sch = VELOCITY_SCHEME == "oblique" ? oblique_scheme :
                  NormalRadiation(inflow_timescale = TAU_IN, outflow_timescale = Inf)
 tracer_scheme  = TRACER_SCHEME == "reservoir" ? TracerReservoir(inflow_length_scale = RESERVOIR_L_IN, outflow_length_scale = RESERVOIR_L_OUT) :
                  TRACER_SCHEME == "radiation" ? NormalRadiation(inflow_timescale = TAU_IN, outflow_timescale = Inf) :
@@ -539,7 +545,7 @@ simulation.output_writers[:checkpointer] = Checkpointer(model;
     prefix = basename(TAG) * "_checkpoint", overwrite_files = false, cleanup = false)
 
 @info "running: tangential=$TANGENTIAL  Uᵉˣᵗ=$UEXT_MODE  τ_in=$(TAU_IN/86400) day(s)  " *
-      "tides=$(join(TIDE_CONSTITUENTS, ",")) velocity=$VELOCITY_SCHEME consistent_ubc=$CONSISTENT_UBC tracers=$TRACER_SCHEME reservoir(L_in=$RESERVOIR_L_IN, L_out=$RESERVOIR_L_OUT)  " *
+      "tides=$(join(TIDE_CONSTITUENTS, ",")) velocity=$VELOCITY_SCHEME$(VELOCITY_SCHEME == "oblique" ? "(τ_in=$(OBLIQUE_TAU_IN/days)d, τ_out=$(OBLIQUE_TAU_OUT/days)d, w=$PHASE_SPEED_WEIGHT)" : "") consistent_ubc=$CONSISTENT_UBC tracers=$TRACER_SCHEME reservoir(L_in=$RESERVOIR_L_IN, L_out=$RESERVOIR_L_OUT)  " *
       "$(sim_days) days  pickup=$PICKUP"
 run!(simulation; pickup = PICKUP, checkpoint_at_end = true)
 println("\n✅ done — $(TAG)")
