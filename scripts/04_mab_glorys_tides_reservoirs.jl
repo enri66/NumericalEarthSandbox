@@ -427,11 +427,10 @@ end
 
 set!(ocean.model, MetadataSet(:temperature, :salinity, :u_velocity, :v_velocity;
                               dataset = glorys, date = start_date, dir = DATA_DIR, region))
+# Start at GLORYS's own sea level: the Flather exterior values are GLORYS's zos, so removing the domain mean
+# here would make the boundaries import or export that mean in the first few hours.
 set!((; free_surface = ocean.model.free_surface.displacement),
      MetadataSet(:free_surface; dataset = glorys, date = start_date, dir = DATA_DIR, region))
-let η = ocean.model.free_surface.displacement
-    η .-= mean(filter(isfinite, interior(η)))
-end
 
 atmosphere = ERA5PrescribedAtmosphere(; start_date, end_date = stop_date, region,
                                       dir = joinpath(DATA_DIR, "era5"))
