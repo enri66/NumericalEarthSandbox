@@ -18,7 +18,8 @@ Eh = FieldTimeSeries(joinpath(OUT, TAG * "_eta.jld2"), "η")
 grid = T3.grid; ug = grid.underlying_grid
 Nx, Ny, Nz = size(ug)
 λ = collect(λnodes(ug, Center())); φ = collect(φnodes(ug, Center())); zc = collect(znodes(ug, Center()))
-bottom = Array(interior(grid.immersed_boundary.bottom_height))[:, :, 1]
+bh = grid.immersed_boundary.bottom_height
+bottom = [bh[i, j, 1] for i in 1:Nx, j in 1:Ny]
 wet3 = [zc[k] > bottom[i, j] for i in 1:Nx, j in 1:Ny, k in 1:Nz]
 wet = wet3[:, :, Nz]
 
