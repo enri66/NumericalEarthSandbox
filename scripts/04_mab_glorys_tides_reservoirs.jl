@@ -31,7 +31,6 @@ using CopernicusMarine              # activates the GLORYS download backend
 using CopernicusClimateDataStore    # activates the ERA5 download backend
 using Oceananigans
 using Oceananigans.Units
-using Oceananigans.OutputReaders: Clamp
 using Oceananigans.Grids: ExponentialDiscretization, znodes, λnodes, φnodes
 using Oceananigans.BoundaryConditions: PerturbationAdvection, NormalRadiation, ObliqueRadiation, TracerReservoir,
                                        GravityWaveRadiationBoundaryCondition,
@@ -122,15 +121,11 @@ glorys = GLORYSDaily()
 meta(name) = Metadata(name; dataset = glorys, dates, dir = DATA_DIR, region)
 
 @info "building GLORYS FieldTimeSeries on the model grid (downloads/inpaints as needed)…"
-# GLORYS values are daily means centred on noon. The default `Cyclical()` indexing fills the first and last
-# 12 hours by wrapping around to the other end of the record, which makes a run's first half-day depend on
-# its length; `Clamp()` holds the first (last) value there instead.
-const time_indexing = Clamp()
-fts_u = FieldTimeSeries(meta(:u_velocity),  src_grid; time_indexing)
-fts_v = FieldTimeSeries(meta(:v_velocity),  src_grid; time_indexing)
-fts_T = FieldTimeSeries(meta(:temperature), src_grid; time_indexing)
-fts_S = FieldTimeSeries(meta(:salinity),    src_grid; time_indexing)
-fts_η = FieldTimeSeries(meta(:free_surface), src_grid; time_indexing)
+fts_u = FieldTimeSeries(meta(:u_velocity),  src_grid)
+fts_v = FieldTimeSeries(meta(:v_velocity),  src_grid)
+fts_T = FieldTimeSeries(meta(:temperature), src_grid)
+fts_S = FieldTimeSeries(meta(:salinity),    src_grid)
+fts_η = FieldTimeSeries(meta(:free_surface), src_grid)
 @info "  done: $(length(fts_u.times)) times, $(Dates.format(start_date,"yyyy-mm-dd")) → $(Dates.format(stop_date,"yyyy-mm-dd"))"
 
 # ---------------- the SUBTIDAL barotropic exterior, from GLORYS (see 02_mab_glorys_obc.jl) ----------------
@@ -176,8 +171,8 @@ src_grid_native_z = LatitudeLongitudeGrid(CPU(); size = (Nλ_src, Nφ_src, Nz_na
                                           longitude = data_λ, latitude = data_φ,
                                           z = z_native, halo = (7, 7, 7))
 @info "building the native-resolution GLORYS u/v for the true depth mean… ($Nz_native levels vs the model's $Nz)"
-fts_u_native = FieldTimeSeries(meta(:u_velocity), src_grid_native_z; time_indexing)
-fts_v_native = FieldTimeSeries(meta(:v_velocity), src_grid_native_z; time_indexing)
+fts_u_native = FieldTimeSeries(meta(:u_velocity), src_grid_native_z)
+fts_v_native = FieldTimeSeries(meta(:v_velocity), src_grid_native_z)
 Hg_src = glorys_deptho_on_grid(src_grid, DATA_DIR; region)
 true_floors = ((-Hg_src[1, :], -Hg_src[end, :]), (-Hg_src[:, 1], -Hg_src[:, end]))
 
@@ -438,9 +433,9 @@ let η = ocean.model.free_surface.displacement
     η .-= mean(filter(isfinite, interior(η)))
 end
 
-atmosphere = ERA5PrescribedAtmosphere(; start_date, end_date = stop_date, region, time_indexing,
+atmosphere = ERA5PrescribedAtmosphere(; start_date, end_date = stop_date, region,
                                       dir = joinpath(DATA_DIR, "era5"))
-radiation  = ERA5PrescribedRadiation(;  start_date, end_date = stop_date, region, time_indexing,
+radiation  = ERA5PrescribedRadiation(;  start_date, end_date = stop_date, region,
                                       dir = joinpath(DATA_DIR, "era5"))
 model = OceanOnlyModel(ocean; atmosphere, radiation)
 simulation = Simulation(model; Δt = 5minutes, stop_time = sim_days * days)
