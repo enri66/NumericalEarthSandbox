@@ -88,6 +88,11 @@ const TRACER_SCHEME = get(ENV, "MAB_TRACER_SCHEME", "reservoir")
 # "true" (default): make the 3D normal velocity at each open face integrate to the barotropic exterior transport
 # used by the Flather condition (see ConsistentNormalFlow below)
 const CONSISTENT_UBC = get(ENV, "MAB_CONSISTENT_UBC", "true") == "true"
+# GLORYS restoring sponge along the open boundaries: the variables to restore ("" = no sponge, "T,S" or
+# "T,S,u,v"), the band width in cells and the restoring timescale at the boundary (see sponge_masks below)
+const SPONGE_VARS  = Symbol.(filter(!isempty, split(get(ENV, "MAB_SPONGE_VARS", ""), ",")))
+const SPONGE_WIDTH = parse(Int, get(ENV, "MAB_SPONGE_WIDTH", "8"))
+const SPONGE_TAU   = parse(Float64, get(ENV, "MAB_SPONGE_TAU", "1")) * days
 
 # checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
 # can be a Bool, an iteration number, or a filepath (see the comment there)
@@ -389,8 +394,71 @@ V_bcs = FieldBoundaryConditions(grid, (Center(), Face(), nothing);
 boundary_conditions = (u = u_bcs, v = v_bcs, T = tracer_bcs(fts_T), S = tracer_bcs(fts_S),
                        U = U_bcs, V = V_bcs, η = η_bcs)
 
+# ---------------- GLORYS restoring sponge (MAB_SPONGE_VARS) ----------------
+# The mask falls from ≈1 at an open boundary to 0 at SPONGE_WIDTH cells from it as cos²(π d / 2W), where d is
+# the distance in cells from the boundary face. A cell belongs to a side's band only if it is connected to that
+# side's wet boundary cell along its row (west/east) or column (south/north), so bays and sounds behind land
+# are left alone. Near a corner the mask is the larger of the two sides' values, i.e. it follows the smaller
+# distance, so the seam between the two bands is the diagonal into the corner.
+function sponge_masks(wet, W)
+    Nx, Ny = size(wet)
+    d = fill(Inf, Nx, Ny)
+    for j in 1:Ny
+        for i in 1:min(W, Nx)
+            wet[i, j] || break
+            d[i, j] = min(d[i, j], i - 0.5)
+        end
+        for i in Nx:-1:max(Nx - W + 1, 1)
+            wet[i, j] || break
+            d[i, j] = min(d[i, j], Nx - i + 0.5)
+        end
+    end
+    for i in 1:Nx
+        for j in 1:min(W, Ny)
+            wet[i, j] || break
+            d[i, j] = min(d[i, j], j - 0.5)
+        end
+        for j in Ny:-1:max(Ny - W + 1, 1)
+            wet[i, j] || break
+            d[i, j] = min(d[i, j], Ny - j + 0.5)
+        end
+    end
+    μᶜ = [d[i, j] < W ? cos(π * d[i, j] / 2W)^2 : 0.0 for i in 1:Nx, j in 1:Ny]
+    # u and v points: the mean of the two neighbouring cell centres (the edge value at the boundary faces)
+    μᵘ = [(μᶜ[clamp(i - 1, 1, Nx), j] + μᶜ[clamp(i, 1, Nx), j]) / 2 for i in 1:Nx+1, j in 1:Ny]
+    μᵛ = [(μᶜ[i, clamp(j - 1, 1, Ny)] + μᶜ[i, clamp(j, 1, Ny)]) / 2 for i in 1:Nx, j in 1:Ny+1]
+    return (; μᶜ, μᵘ, μᵛ)
+end
+
+struct SpongeMask{M}
+    μ :: M
+end
+
+@inline NumericalEarth.stateindex(m::SpongeMask, i, j, k, grid, time, loc) =
+    @inbounds m.μ[clamp(i, 1, size(m.μ, 1)), clamp(j, 1, size(m.μ, 2))]
+
+const sponge = sponge_masks(bh .< 0, SPONGE_WIDTH)
+
+# Restores toward the same GLORYS series the boundary conditions use, interpolated from the GLORYS grid.
+# Note that u and v are restored as a whole, so the sponge also damps the tidal currents that enter through it.
+sponge_restoring(fts, name, μ) =
+    NumericalEarth.DataWrangling.DatasetRestoring(fts, fts.grid, SpongeMask(μ),
+                                                  NumericalEarth.DataWrangling.oceananigans_fieldnames[name],
+                                                  1 / SPONGE_TAU)
+
+sponge_sources = (T = (fts_T, :temperature, sponge.μᶜ), S = (fts_S, :salinity, sponge.μᶜ),
+                  u = (fts_u, :u_velocity, sponge.μᵘ), v = (fts_v, :v_velocity, sponge.μᵛ))
+sponge_forcing = NamedTuple(name => sponge_restoring(sponge_sources[name]...) for name in SPONGE_VARS)
+
+tides   = tidal_forcing(harmonics)
+forcing = merge(sponge_forcing,
+                (u = :u in SPONGE_VARS ? (tides.u, sponge_forcing.u) : tides.u,
+                 v = :v in SPONGE_VARS ? (tides.v, sponge_forcing.v) : tides.v))
+isempty(SPONGE_VARS) || @info @sprintf("GLORYS sponge on %s: %d cells, τ = %.2f days at the boundary, %d wet cells with μ > 0.01",
+                                       join(SPONGE_VARS, ","), SPONGE_WIDTH, SPONGE_TAU / days, count(>(0.01), sponge.μᶜ))
+
 # ---------------- ocean simulation: GLORYS boundaries + equilibrium tidal body force ----------------
-ocean = ocean_simulation(grid; boundary_conditions, forcing = tidal_forcing(harmonics))
+ocean = ocean_simulation(grid; boundary_conditions, forcing)
 
 if CONSISTENT_UBC
     vel = ocean.model.velocities
