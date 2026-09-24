@@ -148,7 +148,7 @@ end
 
 # ---------------- figure ----------------
 d, m, g = last_maps
-fig = Figure(size = (2000, 1400), fontsize = 18)
+fig = Figure(size = (2100, 1150), fontsize = 18)
 Label(fig[0, 1:6], "$(TAG): model vs GLORYS, day $(d) daily means (top), RMS difference by distance from the open boundary (bottom)", fontsize = 22)
 mask(A) = [wet[i, j] ? A[i, j] : NaN for i in 1:Nx, j in 1:Ny]
 for (c, (v, cr, cm)) in enumerate((("SST", (8, 26), :thermal), ("η", (-0.8, 0.8), :balance)))
@@ -163,12 +163,13 @@ for (c, (v, cr, cm)) in enumerate((("SST", (8, 26), :thermal), ("η", (-0.8, 0.8
 end
 colors = cgrad(:viridis, length(bands); categorical = true)
 for (c, v) in enumerate(vars)
-    ax = Axis(fig[3, c + (c > 3 ? 1 : 0)], title = "RMS $(v) ($(units[v]))", xlabel = "day")
+    ax = Axis(fig[3, c], title = "RMS $(v) ($(units[v]))", xlabel = "day")
     for (b, (name, _)) in enumerate(bands)
         lines!(ax, 0:ndays-1, [stats[(v, b, dd)][2] for dd in 0:ndays-1]; color = colors[b], linewidth = 2.5, label = name)
     end
-    c == 1 && axislegend(ax, position = :lt, labelsize = 13)
+    c == 1 && Legend(fig[3, 6], ax, "cells from the\nopen boundary"; framevisible = false)
 end
+rowsize!(fig.layout, 1, Relative(0.42)); rowsize!(fig.layout, 3, Relative(0.42))
 out = joinpath(OUT, TAG * "_boundary_vs_glorys.png")
 save(out, fig; px_per_unit = 1.2)
 println("\nsaved ", out)
