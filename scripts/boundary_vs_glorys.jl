@@ -4,7 +4,7 @@
 # volume output is compared in 3D for T and S. Usage:
 #   MAB_TAG=mab_obc14 julia --project=. scripts/boundary_vs_glorys.jl
 using Oceananigans, NumericalEarth, Printf, Statistics, Dates, CairoMakie
-const NCD = NumericalEarth.NCDatasets
+const NCD = Base.require(Base.PkgId(Base.UUID("85f8d34a-cbdf-5860-8e91-1b9a8e1a0c26"), "NCDatasets"))   # a NumericalEarth dependency
 
 const OUT  = joinpath(homedir(), "Data", "mab_glorys_obc")
 const GDIR = get(ENV, "MAB_DATA_DIR", joinpath(homedir(), "Data", "NumericalEarth"))
