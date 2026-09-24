@@ -78,9 +78,9 @@ const RESERVOIR_L_IN  = parse(Float64, get(ENV, "MAB_RESERVOIR_L_IN", "20000"))
 const RESERVOIR_L_OUT = parse(Float64, get(ENV, "MAB_RESERVOIR_L_OUT", "0"))
 # T/S open-boundary scheme: "reservoir" (default), "radiation" (NormalRadiation, as script 02) or "oblique"
 const TRACER_SCHEME = get(ENV, "MAB_TRACER_SCHEME", "reservoir")
-# "true": make the 3D normal velocity at each open face integrate to the barotropic exterior transport
+# "true" (default): make the 3D normal velocity at each open face integrate to the barotropic exterior transport
 # used by the Flather condition (see ConsistentNormalFlow below)
-const CONSISTENT_UBC = get(ENV, "MAB_CONSISTENT_UBC", "false") == "true"
+const CONSISTENT_UBC = get(ENV, "MAB_CONSISTENT_UBC", "true") == "true"
 
 # checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
 # can be a Bool, an iteration number, or a filepath (see the comment there)
