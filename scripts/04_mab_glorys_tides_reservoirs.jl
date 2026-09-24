@@ -344,8 +344,10 @@ normal_scheme  = VELOCITY_SCHEME == "oblique" ? oblique_scheme :
                  VELOCITY_SCHEME == "legacy"  ? PerturbationAdvection(inflow_timescale = TAU_IN, outflow_timescale = Inf) :
                  error("MAB_VELOCITY_SCHEME must be oblique or legacy, got $VELOCITY_SCHEME")
 # MAB_TANGENTIAL: "radiated" (the velocity scheme's own radiation), "normal" (NormalRadiation with the
-# 1-day inflow nudging, whatever the velocity scheme), or "prescribed" (the GLORYS value, no radiation)
-tangential_sch = TANGENTIAL == "normal" || VELOCITY_SCHEME != "oblique" ?
+# 1-day inflow nudging, whatever the velocity scheme), "oblique" (ObliqueRadiation, whatever the velocity
+# scheme), or "prescribed" (the GLORYS value, no radiation)
+tangential_sch = TANGENTIAL == "oblique" ? oblique_scheme :
+                 TANGENTIAL == "normal" || VELOCITY_SCHEME != "oblique" ?
                  NormalRadiation(inflow_timescale = TAU_IN, outflow_timescale = Inf) : oblique_scheme
 tracer_scheme  = TRACER_SCHEME == "reservoir" ? TracerReservoir(inflow_length_scale = RESERVOIR_L_IN, outflow_length_scale = RESERVOIR_L_OUT) :
                  TRACER_SCHEME == "radiation" ? NormalRadiation(inflow_timescale = TAU_IN, outflow_timescale = Inf) :
