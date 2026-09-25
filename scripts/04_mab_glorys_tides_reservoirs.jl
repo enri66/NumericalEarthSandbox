@@ -93,7 +93,7 @@ const CONSISTENT_UBC = get(ENV, "MAB_CONSISTENT_UBC", "true") == "true"
 # timescale at the boundary (see sponge_masks below)
 const SPONGE_VARS  = Symbol.(filter(!isempty, split(get(ENV, "MAB_SPONGE_VARS", ""), ",")))
 const SPONGE_WIDTH = parse(Int, get(ENV, "MAB_SPONGE_WIDTH", "8"))
-const SPONGE_TAU   = parse(Float64, get(ENV, "MAB_SPONGE_TAU", "1")) * days
+const SPONGE_TAU   = parse(Float64, get(ENV, "MAB_SPONGE_TAU", "0.25")) * days
 
 # checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
 # can be a Bool, an iteration number, or a filepath (see the comment there)
