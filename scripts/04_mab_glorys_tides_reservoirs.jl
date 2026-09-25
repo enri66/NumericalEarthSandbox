@@ -431,31 +431,21 @@ function sponge_masks(wet, W)
     return (; μᶜ, μᵘ, μᵛ)
 end
 
-struct SpongeMask{M}
-    μ :: M
-end
-
-@inline NumericalEarth.stateindex(m::SpongeMask, i, j, k, grid, time, loc) =
-    @inbounds m.μ[clamp(i, 1, size(m.μ, 1)), clamp(j, 1, size(m.μ, 2))]
-
 const sponge = sponge_masks(bh .< 0, SPONGE_WIDTH)
 
-# T and S restore toward the same GLORYS series the boundary conditions use, interpolated from the GLORYS grid.
-sponge_restoring(fts, name, μ) =
-    NumericalEarth.DataWrangling.DatasetRestoring(fts, fts.grid, SpongeMask(μ),
-                                                  NumericalEarth.DataWrangling.oceananigans_fieldnames[name],
-                                                  1 / SPONGE_TAU)
-
-# u and v restore only their baroclinic part: the tendency is r μ [(ψᴳ - ψ̄ᴳ) - (ψ - ψ̄)], where the overbar is the
-# mean over the model's wet column. It integrates to zero over the column, so the barotropic flow (and the
-# tide) is left to the Flather condition. The GLORYS part is computed once per GLORYS frame for the sponge
-# columns only; the model's depth mean is computed in the forcing itself, so it is always the current one.
+# The sponge restores toward the same GLORYS series the boundary conditions use. GLORYS is interpolated onto the
+# model's sponge cells once per GLORYS frame, before the run; during the run the target is only interpolated in time.
+# T and S restore as they are: r μ (ψᴳ - ψ). u and v restore only their baroclinic part: r μ [(ψᴳ - ψ̄ᴳ) - (ψ - ψ̄)],
+# where the overbar is the mean over the model's wet column. That integrates to zero over the column, so the
+# barotropic flow (and the tide) is left to the Flather condition. The model's depth mean is computed in the
+# forcing itself, so it is always the current one.
 using Oceananigans.Grids: inactive_cell
 
+@inline wet_node(i, j, k, grid, ::Center, ::Center) = !inactive_cell(i, j, k, grid)
 @inline wet_node(i, j, k, grid, ::Face, ::Center) = !inactive_cell(i, j, k, grid) & !inactive_cell(i - 1, j, k, grid)
 @inline wet_node(i, j, k, grid, ::Center, ::Face) = !inactive_cell(i, j, k, grid) & !inactive_cell(i, j - 1, k, grid)
 
-function baroclinic_sponge(fts, μ, LX, LY)
+function sponge_parameters(fts, μ, LX, LY; baroclinic)
     columns = [(i, j) for j in axes(μ, 2), i in axes(μ, 1) if μ[i, j] > 0]
     column_index = zeros(Int, size(μ))
     weights = zeros(length(columns), Nz)
@@ -477,40 +467,46 @@ function baroclinic_sponge(fts, μ, LX, LY)
                 profile[k] = weights[c, k] > 0 ?
                     Oceananigans.Fields.interpolate(Oceananigans.Grids.node(i, j, k, grid, LX, LY, Center()), frame_field, loc, fts.grid) : 0.0
             end
-            mean_profile = sum(weights[c, k] * profile[k] for k in 1:Nz)
+            mean_profile = baroclinic ? sum(weights[c, k] * profile[k] for k in 1:Nz) : 0.0
             for k in 1:Nz
                 target[c, k, n] = weights[c, k] > 0 ? profile[k] - mean_profile : 0.0
             end
         end
     end
 
-    return (; column_index, μ = [μ[i, j] for (i, j) in columns], weights, target, times, rate = 1 / SPONGE_TAU)
+    return (; column_index, μ = [μ[i, j] for (i, j) in columns], weights, target, times, rate = 1 / SPONGE_TAU, baroclinic)
 end
 
-@inline function baroclinic_restoring(i, j, k, grid, clock, ψ, p)
+@inline function sponge_restoring(i, j, k, grid, clock, ψ, p)
     ci = clamp(i, 1, size(p.column_index, 1))
     cj = clamp(j, 1, size(p.column_index, 2))
     c = @inbounds p.column_index[ci, cj]
     (c == 0 || @inbounds(p.weights[c, k]) == 0) && return zero(eltype(grid))
     ψ̄ = zero(eltype(grid))
-    @inbounds for k′ in axes(p.weights, 2)
-        ψ̄ += p.weights[c, k′] * ψ[i, j, k′]
+    if p.baroclinic
+        @inbounds for k′ in axes(p.weights, 2)
+            ψ̄ += p.weights[c, k′] * ψ[i, j, k′]
+        end
     end
     n₁, n₂, w = frame(p.times, clock.time)
     ψᴳ = @inbounds (1 - w) * p.target[c, k, n₁] + w * p.target[c, k, n₂]
     return @inbounds p.rate * p.μ[c] * (ψᴳ - (ψ[i, j, k] - ψ̄))
 end
 
-@inline u_baroclinic_restoring(i, j, k, grid, clock, fields, p) = baroclinic_restoring(i, j, k, grid, clock, fields.u, p)
-@inline v_baroclinic_restoring(i, j, k, grid, clock, fields, p) = baroclinic_restoring(i, j, k, grid, clock, fields.v, p)
+@inline T_sponge(i, j, k, grid, clock, fields, p) = sponge_restoring(i, j, k, grid, clock, fields.T, p)
+@inline S_sponge(i, j, k, grid, clock, fields, p) = sponge_restoring(i, j, k, grid, clock, fields.S, p)
+@inline u_sponge(i, j, k, grid, clock, fields, p) = sponge_restoring(i, j, k, grid, clock, fields.u, p)
+@inline v_sponge(i, j, k, grid, clock, fields, p) = sponge_restoring(i, j, k, grid, clock, fields.v, p)
 
 function sponge_forcing_for(name)
-    name == :T && return sponge_restoring(fts_T, :temperature, sponge.μᶜ)
-    name == :S && return sponge_restoring(fts_S, :salinity, sponge.μᶜ)
-    name == :u && return Forcing(u_baroclinic_restoring; discrete_form = true,
-                                 parameters = baroclinic_sponge(fts_u, sponge.μᵘ, Face(), Center()))
-    name == :v && return Forcing(v_baroclinic_restoring; discrete_form = true,
-                                 parameters = baroclinic_sponge(fts_v, sponge.μᵛ, Center(), Face()))
+    name == :T && return Forcing(T_sponge; discrete_form = true,
+                                 parameters = sponge_parameters(fts_T, sponge.μᶜ, Center(), Center(); baroclinic = false))
+    name == :S && return Forcing(S_sponge; discrete_form = true,
+                                 parameters = sponge_parameters(fts_S, sponge.μᶜ, Center(), Center(); baroclinic = false))
+    name == :u && return Forcing(u_sponge; discrete_form = true,
+                                 parameters = sponge_parameters(fts_u, sponge.μᵘ, Face(), Center(); baroclinic = true))
+    name == :v && return Forcing(v_sponge; discrete_form = true,
+                                 parameters = sponge_parameters(fts_v, sponge.μᵛ, Center(), Face(); baroclinic = true))
     error("MAB_SPONGE_VARS entries must be T, S, u or v, got $name")
 end
 
