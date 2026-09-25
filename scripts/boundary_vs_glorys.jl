@@ -77,11 +77,12 @@ end
 anom(A) = (m = mean(A[i, j] for i in 1:Nx, j in 1:Ny if wet[i, j] && isfinite(A[i, j])); A .- m)
 
 ndays = min(floor(Int, maximum(tday(T3))), MAXDAY)
+days = floor(Int, minimum(tday(T3))):ndays-1   # a run picked up from a checkpoint starts after day 0
 vars = ("SST", "SSS", "η", "u", "v")
 stats = Dict{Tuple{String, Int, Int}, Tuple{Float64, Float64}}()   # (var, band, day) -> (bias, rms)
 sidestats = Dict{Tuple{String, Int, Int}, Tuple{Float64, Float64}}()  # (var, side, day) for the edge + 1-2 bands
 last_maps = nothing
-for d in 0:ndays-1
+for d in days
     date = start_date + Day(d)
     m = Dict("SST" => daily_mean(T3, d), "SSS" => daily_mean(S3, d), "η" => anom(daily_mean(Eh, d)),
              "u" => daily_mean(U3, d; face = :x), "v" => daily_mean(V3, d; face = :y))
@@ -105,16 +106,16 @@ end
 units = Dict("SST" => "°C", "SSS" => "psu", "η" => "m", "u" => "m/s", "v" => "m/s")
 println("\n==== RMS model − GLORYS (daily means) by distance from the open boundary ====")
 for v in vars
-    @printf("\n%s (%s)   day: %s\n", v, units[v], join([@sprintf("%6d", d) for d in 0:ndays-1]))
+    @printf("\n%s (%s)   day: %s\n", v, units[v], join([@sprintf("%6d", d) for d in days]))
     for (b, (name, _)) in enumerate(bands)
-        @printf("  %-16s %s\n", name, join([@sprintf("%6.3f", stats[(v, b, d)][2]) for d in 0:ndays-1]))
+        @printf("  %-16s %s\n", name, join([@sprintf("%6.3f", stats[(v, b, d)][2]) for d in days]))
     end
 end
 println("\n==== bias (model − GLORYS) within 2 cells of each open side, first and last day ====")
 for v in vars
     @printf("%-4s", v)
     for s in 1:4
-        @printf("  %-5s %+7.3f → %+7.3f", sidenames[s], sidestats[(v, s, 0)][1], sidestats[(v, s, ndays - 1)][1])
+        @printf("  %-5s %+7.3f → %+7.3f", sidenames[s], sidestats[(v, s, first(days))][1], sidestats[(v, s, ndays - 1)][1])
     end
     println()
 end
@@ -165,7 +166,7 @@ colors = cgrad(:viridis, length(bands); categorical = true)
 for (c, v) in enumerate(vars)
     ax = Axis(fig[3, c], title = "RMS $(v) ($(units[v]))", xlabel = "day")
     for (b, (name, _)) in enumerate(bands)
-        lines!(ax, 0:ndays-1, [stats[(v, b, dd)][2] for dd in 0:ndays-1]; color = colors[b], linewidth = 2.5, label = name)
+        lines!(ax, days, [stats[(v, b, dd)][2] for dd in days]; color = colors[b], linewidth = 2.5, label = name)
     end
     c == 1 && Legend(fig[3, 6], ax, "cells from the\nopen boundary"; framevisible = false)
 end
