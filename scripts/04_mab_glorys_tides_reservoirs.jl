@@ -42,7 +42,9 @@ include(joinpath(@__DIR__, "glorys_bathymetry.jl"))
 # See 02_mab_glorys_obc.jl for why this defaults to the shared out-of-Dropbox cache.
 const DATA_DIR   = get(ENV, "MAB_DATA_DIR", joinpath(homedir(), "Data", "NumericalEarth"))
 const resolution = 1 / 12
-const Nz = 40
+# vertical grid: Nz levels to 4000 m, exponentially stretched so that the top layer is MAB_DZ_TOP metres thick
+const Nz     = parse(Int, get(ENV, "MAB_NZ", "50"))
+const Δz_top = parse(Float64, get(ENV, "MAB_DZ_TOP", "2"))
 
 const n_pad      = 2
 const data_λ     = (-76.0, -64.0)          # GLORYS box (what is on disk)
@@ -105,8 +107,20 @@ const CHECKPOINT_EVERY = parse(Float64, get(ENV, "MAB_CHECKPOINT_EVERY", "5")) *
 
 mkpath(DATA_DIR)
 
-# ---------------- grid + bathymetry (identical to script 02) ----------------
-z = ExponentialDiscretization(Nz, -4000, 0; scale = 1400)
+# ---------------- grid + bathymetry (as script 02, with a finer vertical grid) ----------------
+# The top layer of a right-biased ExponentialDiscretization over depth H is H expm1(H / Nz / h) / expm1(H / h), which
+# grows with the scale h; find the h that makes it Δz_top.
+function exponential_scale(N, H, Δtop)
+    top(h) = H * expm1(H / N / h) / expm1(H / h)
+    lo, hi = H / 50, 100H
+    for _ in 1:200
+        mid = (lo + hi) / 2
+        top(mid) > Δtop ? (hi = mid) : (lo = mid)
+    end
+    return (lo + hi) / 2
+end
+
+z = ExponentialDiscretization(Nz, -4000, 0; scale = exponential_scale(Nz, 4000, Δz_top))
 grid = LatitudeLongitudeGrid(CPU(); size = (Nλ, Nφ, Nz),
                              longitude = λ_bounds, latitude = φ_bounds, z, halo = (7, 7, 7))
 bottom_height = regrid_bathymetry(grid; dataset = ETOPO2022(), height_above_water = 1,
