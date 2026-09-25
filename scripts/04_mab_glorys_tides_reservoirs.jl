@@ -94,6 +94,10 @@ const CONSISTENT_UBC = get(ENV, "MAB_CONSISTENT_UBC", "true") == "true"
 const SPONGE_VARS  = Symbol.(filter(!isempty, split(get(ENV, "MAB_SPONGE_VARS", ""), ",")))
 const SPONGE_WIDTH = parse(Int, get(ENV, "MAB_SPONGE_WIDTH", "8"))
 const SPONGE_TAU   = parse(Float64, get(ENV, "MAB_SPONGE_TAU", "0.25")) * days
+# Surface salinity restoring toward GLORYS as a salt flux with this piston velocity (m/day; 0 turns it off). Over a
+# mixed layer of depth h it damps salinity differences in h / piston: ~30 days for a 15 m summer mixed layer,
+# ~120 days for 60 m, slow enough to keep the model's eddies and fast enough to hold the seasonal cycle.
+const SSS_PISTON   = parse(Float64, get(ENV, "MAB_SSS_PISTON", "0.5")) / days
 
 # checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
 # can be a Bool, an iteration number, or a filepath (see the comment there)
@@ -519,8 +523,43 @@ forcing = merge(sponge_forcing,
 isempty(SPONGE_VARS) || @info @sprintf("GLORYS sponge on %s: %d cells, τ = %.2f days at the boundary, %d wet cells with μ > 0.01",
                                        join(SPONGE_VARS, ","), SPONGE_WIDTH, SPONGE_TAU / days, count(>(0.01), sponge.μᶜ))
 
+# ---------------- surface salinity restoring toward GLORYS (MAB_SSS_PISTON) ----------------
+# A surface salt flux J = -w (Sᴳ - S) on the top cell, with w the piston velocity, added to the bulk-formula fluxes.
+# GLORYS salinity is interpolated onto the model's top cells once per GLORYS frame, before the run.
+struct SurfaceSalinityRestoring{A, T}
+    target :: A
+    times  :: T
+    piston :: Float64
+end
+
+function SurfaceSalinityRestoring(fts, piston)
+    times = collect(fts.times)
+    loc = Oceananigans.instantiated_location(fts)
+    target = zeros(Nλ, Nφ, length(times))
+    for n in eachindex(times)
+        frame_field = fts[n]
+        for j in 1:Nφ, i in 1:Nλ
+            X = Oceananigans.Grids.node(i, j, Nz, grid, Center(), Center(), Center())
+            target[i, j, n] = Oceananigans.Fields.interpolate(X, frame_field, loc, fts.grid)
+        end
+    end
+    return SurfaceSalinityRestoring(target, times, piston)
+end
+
+@inline function getbc(r::SurfaceSalinityRestoring, i::Integer, j::Integer, grid::Oceananigans.Grids.AbstractGrid, clock, fields)
+    ci = clamp(i, 1, size(r.target, 1))
+    cj = clamp(j, 1, size(r.target, 2))
+    n₁, n₂, w = frame(r.times, clock.time)
+    Sᴳ = @inbounds (1 - w) * r.target[ci, cj, n₁] + w * r.target[ci, cj, n₂]
+    return @inbounds - r.piston * (Sᴳ - fields.S[i, j, grid.Nz])
+end
+
+sss_restoring = SSS_PISTON > 0 ? SurfaceSalinityRestoring(fts_S, SSS_PISTON) : nothing
+additional_surface_fluxes = isnothing(sss_restoring) ? NamedTuple() : (; S = sss_restoring)
+isnothing(sss_restoring) || @info @sprintf("surface salinity restoring toward GLORYS: piston velocity %.2f m/day", SSS_PISTON * days)
+
 # ---------------- ocean simulation: GLORYS boundaries + equilibrium tidal body force ----------------
-ocean = ocean_simulation(grid; boundary_conditions, forcing)
+ocean = ocean_simulation(grid; boundary_conditions, forcing, additional_surface_fluxes)
 
 if CONSISTENT_UBC
     vel = ocean.model.velocities
@@ -612,6 +651,12 @@ save_fields = (u = Field(oc.velocities.u; indices = (:, :, grid.Nz)),
                v = Field(oc.velocities.v; indices = (:, :, grid.Nz)),
                T = Field(oc.tracers.T;   indices = (:, :, grid.Nz)),
                S = Field(oc.tracers.S;   indices = (:, :, grid.Nz)))
+# The surface salinity restoring flux (psu m/s, positive out of the ocean), saved with the surface fields
+@inline sss_restoring_flux(i, j, k, grid, r, clock, S) = getbc(r, i, j, grid, clock, (; S))
+if !isnothing(sss_restoring)
+    sss_flux = Field(KernelFunctionOperation{Center, Center, Nothing}(sss_restoring_flux, grid, sss_restoring, oc.clock, oc.tracers.S))
+    save_fields = merge(save_fields, (; sss_flux))
+end
 volume_fields = (u = oc.velocities.u, v = oc.velocities.v, w = oc.velocities.w,
                  T = oc.tracers.T, S = oc.tracers.S)
 η_out = (; η = oc.free_surface.displacement)
