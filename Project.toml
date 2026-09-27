@@ -11,6 +11,5 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [sources]
-ClimaSeaIce = {rev = "widen-oceananigans-compat", url = "https://github.com/enri66/ClimaSeaIce.jl.git"}
 NumericalEarth = {rev = "everything", url = "https://github.com/enri66/NumericalEarth.jl.git"}
 Oceananigans = {rev = "everything", url = "https://github.com/enri66/Oceananigans.jl.git"}
