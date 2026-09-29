@@ -97,6 +97,7 @@ const SPONGE_VARS  = Symbol.(filter(!isempty, split(get(ENV, "MAB_SPONGE_VARS", 
 const SPONGE_WIDTH = parse(Int, get(ENV, "MAB_SPONGE_WIDTH", "8"))
 const SPONGE_TAU   = parse(Float64, get(ENV, "MAB_SPONGE_TAU", "0.25")) * days
 const SPONGE_SHAPE = get(ENV, "MAB_SPONGE_SHAPE", "cos2")  # "cos2" (default, smooth) | "linear"
+const SPONGE_CORNER = get(ENV, "MAB_SPONGE_CORNER", "max")  # "max" (default) | "product" — see sponge_masks
 # Surface salinity restoring toward GLORYS as a salt flux with this piston velocity (m/day; 0 turns it off). Over a
 # mixed layer of depth h it damps salinity differences in h / piston: ~30 days for a 15 m summer mixed layer,
 # ~120 days for 60 m, slow enough to keep the model's eddies and fast enough to hold the seasonal cycle.
@@ -423,36 +424,40 @@ boundary_conditions = (u = u_bcs, v = v_bcs, T = tracer_bcs(fts_T), S = tracer_b
 # The mask falls from ≈1 at an open boundary to 0 at SPONGE_WIDTH cells from it as cos²(π d / 2W), where d is
 # the distance in cells from the boundary face. A cell belongs to a side's band only if it is connected to that
 # side's wet boundary cell along its row (west/east) or column (south/north), so bays and sounds behind land
-# are left alone. Near a corner the mask is the larger of the two sides' values, i.e. it follows the smaller
-# distance, so the seam between the two bands is the diagonal into the corner.
+# are left alone. MAB_SPONGE_CORNER sets how two sides' masks combine near a corner: "max" (default) takes the
+# larger, i.e. follows the smaller distance, so the mask has a crease along the diagonal into the corner;
+# "product" takes 1 - (1 - m₁)(1 - m₂), which is smooth there and a little larger than "max" near the corner.
 # MAB_SPONGE_SHAPE: the taper from 1 at the boundary (d=0) to 0 at the sponge edge (d=W). "cos2" (default)
 # has zero slope at both ends; "linear" ramps down at a constant rate and has a slope discontinuity at d=W.
 sponge_shape(d, W) = SPONGE_SHAPE == "linear" ? 1 - d / W : cos(π * d / 2W)^2
 
 function sponge_masks(wet, W)
     Nx, Ny = size(wet)
-    d = fill(Inf, Nx, Ny)
+    # d[i, j, side]: distance in cells from the west, east, south and north boundary faces
+    d = fill(Inf, Nx, Ny, 4)
     for j in 1:Ny
         for i in 1:min(W, Nx)
             wet[i, j] || break
-            d[i, j] = min(d[i, j], i - 0.5)
+            d[i, j, 1] = i - 0.5
         end
         for i in Nx:-1:max(Nx - W + 1, 1)
             wet[i, j] || break
-            d[i, j] = min(d[i, j], Nx - i + 0.5)
+            d[i, j, 2] = Nx - i + 0.5
         end
     end
     for i in 1:Nx
         for j in 1:min(W, Ny)
             wet[i, j] || break
-            d[i, j] = min(d[i, j], j - 0.5)
+            d[i, j, 3] = j - 0.5
         end
         for j in Ny:-1:max(Ny - W + 1, 1)
             wet[i, j] || break
-            d[i, j] = min(d[i, j], Ny - j + 0.5)
+            d[i, j, 4] = Ny - j + 0.5
         end
     end
-    μᶜ = [d[i, j] < W ? sponge_shape(d[i, j], W) : 0.0 for i in 1:Nx, j in 1:Ny]
+    m = [d[i, j, s] < W ? sponge_shape(d[i, j, s], W) : 0.0 for i in 1:Nx, j in 1:Ny, s in 1:4]
+    μᶜ = SPONGE_CORNER == "product" ? [1 - prod(1 .- m[i, j, :]) for i in 1:Nx, j in 1:Ny] :
+                                      dropdims(maximum(m; dims = 3); dims = 3)
     # u and v points: the mean of the two neighbouring cell centres (the edge value at the boundary faces)
     μᵘ = [(μᶜ[clamp(i - 1, 1, Nx), j] + μᶜ[clamp(i, 1, Nx), j]) / 2 for i in 1:Nx+1, j in 1:Ny]
     μᵛ = [(μᶜ[i, clamp(j - 1, 1, Ny)] + μᶜ[i, clamp(j, 1, Ny)]) / 2 for i in 1:Nx, j in 1:Ny+1]
