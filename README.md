@@ -1,8 +1,8 @@
 # NumericalEarthSandbox
 
-A single environment that combines five in-progress Oceananigans.jl features —
-open-boundary radiation, tracer reservoirs, tides, low-pass-filtered output,
-and a split-explicit substep-clock fix — with
+A single environment that combines in-progress Oceananigans.jl and
+NumericalEarth.jl changes — tides, open-boundary fixes, restart fixes and a
+CATKE fix — with
 [NumericalEarth.jl](https://github.com/NumericalEarth/NumericalEarth.jl)'s
 realistic regional-ocean machinery (ETOPO bathymetry, GLORYS, ERA5, sea ice),
 so they can be tried together before each lands upstream on its own.
@@ -11,23 +11,32 @@ None of this is meant for upstream merge. It exists to let a colleague clone
 one thing and get the whole combined feature set, while the individual
 pieces work their way through review:
 
-| feature | Oceananigans PR |
-|---|---|
-| `ObliqueRadiation` | [CliMA/Oceananigans.jl#5962](https://github.com/CliMA/Oceananigans.jl/pull/5962) |
-| `TracerReservoir` | [CliMA/Oceananigans.jl#5964](https://github.com/CliMA/Oceananigans.jl/pull/5964) |
-| `TidalHarmonics` (planet-agnostic), `tidal_forcing`, `tidal_boundary_conditions` | [CliMA/Oceananigans.jl#5970](https://github.com/CliMA/Oceananigans.jl/pull/5970) |
-| `FilteredTimeInterval` (was `FilteredTimeInterval`) | [CliMA/Oceananigans.jl#5971](https://github.com/CliMA/Oceananigans.jl/pull/5971) |
-| Split-explicit barotropic substep clock fix | [CliMA/Oceananigans.jl#5982](https://github.com/CliMA/Oceananigans.jl/pull/5982) |
-| `TPXO10Atlas`, `earth_tidal_harmonics` (Earth's tidal astronomy) | [NumericalEarth/NumericalEarth.jl#681](https://github.com/NumericalEarth/NumericalEarth.jl/pull/681) |
+| feature | PR | status |
+|---|---|---|
+| `ObliqueRadiation` | [CliMA/Oceananigans.jl#5962](https://github.com/CliMA/Oceananigans.jl/pull/5962) | merged |
+| `TracerReservoir` | [CliMA/Oceananigans.jl#5964](https://github.com/CliMA/Oceananigans.jl/pull/5964) | merged |
+| `FilteredTimeInterval` | [CliMA/Oceananigans.jl#5971](https://github.com/CliMA/Oceananigans.jl/pull/5971) | merged |
+| `TidalHarmonics` (planet-agnostic), `tidal_forcing`, `tidal_boundary_conditions` | [CliMA/Oceananigans.jl#5970](https://github.com/CliMA/Oceananigans.jl/pull/5970) | open |
+| Split-explicit barotropic substep clock fix | [CliMA/Oceananigans.jl#5982](https://github.com/CliMA/Oceananigans.jl/pull/5982) | open |
+| Split Runge-Kutta momentum tendencies at each substep (exact restarts) | [CliMA/Oceananigans.jl#6090](https://github.com/CliMA/Oceananigans.jl/pull/6090) | open |
+| `ObliqueRadiation`: tangential velocities radiated with the normal velocity's phase speed | [CliMA/Oceananigans.jl#6091](https://github.com/CliMA/Oceananigans.jl/pull/6091) | open |
+| CATKE bottom mixing length coefficient `Cᵇ` | [CliMA/Oceananigans.jl#6024](https://github.com/CliMA/Oceananigans.jl/pull/6024) | open |
+| Open boundary scheme state in checkpoints; anchor open boundaries once per iteration | fork branches `checkpoint-boundary-state`, `obc-anchor-once-per-iteration` | no PR yet |
+| `TPXO10Atlas`, `earth_tidal_harmonics` (Earth's tidal astronomy) | [NumericalEarth/NumericalEarth.jl#681](https://github.com/NumericalEarth/NumericalEarth.jl/pull/681) | open |
+| Each prescribed atmosphere field interpolated on its own time axis | [NumericalEarth/NumericalEarth.jl#711](https://github.com/NumericalEarth/NumericalEarth.jl/pull/711) | open |
 
-The five Oceananigans branches are merged together, conflict-free, at
+The open Oceananigans branches are merged on top of upstream `main` at
 [`enri66/Oceananigans.jl#everything`](https://github.com/enri66/Oceananigans.jl/tree/everything).
 [`enri66/NumericalEarth.jl#everything`](https://github.com/enri66/NumericalEarth.jl/tree/everything)
-adds `TPXO10Atlas` and points its own `Oceananigans` dependency at that
-branch (and its `ClimaSeaIce` dependency at
-[`enri66/ClimaSeaIce.jl#widen-oceananigans-compat`](https://github.com/enri66/ClimaSeaIce.jl/tree/widen-oceananigans-compat),
-since the registered ClimaSeaIce caps its Oceananigans compat below what
-the combined branch needs).
+adds `TPXO10Atlas` and #711 on top of NumericalEarth `main`, and points its
+own `Oceananigans` dependency at that branch.
+
+#711 matters for every ERA5-forced run: without it, ERA5 precipitation (whose
+samples sit at the centres of their hourly windows, half an hour off the other
+fields) is read from outside its loaded window once that window reloads, and
+script `04` crashes within the first simulated day (negative salinity, a
+`DomainError` in TEOS-10 inside CATKE). Specific humidity is also read at the
+wrong time, which breaks exact restarts.
 
 ## Running
 
@@ -86,7 +95,16 @@ see each script's own comment block for its environment-variable knobs
 (`03`: `MAB_DAYS`, `MAB_NZ`, `MAB_CLOSURE`, `MAB_TANGENTIAL`, ...; `02`/`04`:
 `MAB_DAYS`, `MAB_UEXT`, `MAB_TANGENTIAL`, `MAB_TAU_IN`, `MAB_MATCH_BATHY`, ...;
 `04` additionally: `MAB_TIDE_CONSTITUENTS`, `MAB_TIDE_RAMP`,
-`MAB_RESERVOIR_L_IN`, `MAB_RESERVOIR_L_OUT`).
+`MAB_RESERVOIR_L_IN`, `MAB_RESERVOIR_L_OUT`, `MAB_START_DATE`,
+`MAB_DT_MINUTES`, `MAB_SPONGE_SHAPE`).
+
+`04` also has debugging knobs: `MAB_FLUXDUMP=file` (min/max/mean and location
+of every interpolated atmospheric field and air-sea flux, every
+`MAB_FLUXDUMP_MINUTES`), `MAB_STATEDUMP=file` (full-precision ocean-state
+checksums, to compare repeats bit for bit, and the location of each field's
+extremes, every `MAB_STATEDUMP_MINUTES`), `MAB_UNIFORM_P=1` (uniform
+atmospheric pressure), and for exact-restart work `MAB_STOP_ITERATION`,
+`MAB_CHECKPOINT_ITERATIONS`, `MAB_SNAPSHOT` and `MAB_DUMP_RESTORE`.
 
 ### Data
 

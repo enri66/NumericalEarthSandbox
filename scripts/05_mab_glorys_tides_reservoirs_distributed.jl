@@ -147,6 +147,10 @@ const SSS_PISTON   = parse(Float64, get(ENV, "MAB_SSS_PISTON", "0.5")) / days
 # checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
 # can be a Bool, an iteration number, or a filepath (see the comment there)
 const CHECKPOINT_EVERY = parse(Float64, get(ENV, "MAB_CHECKPOINT_EVERY", "5")) * days
+# For exact-restart debugging: MAB_STOP_ITERATION stops the run after that iteration (default: run to MAB_DAYS), and
+# MAB_CHECKPOINT_ITERATIONS writes a checkpoint every that many iterations instead of every MAB_CHECKPOINT_EVERY days.
+const STOP_ITERATION        = parse(Float64, get(ENV, "MAB_STOP_ITERATION", "Inf"))
+const CHECKPOINT_ITERATIONS = parse(Int, get(ENV, "MAB_CHECKPOINT_ITERATIONS", "0"))
 
 mkpath(DATA_DIR)
 
@@ -733,7 +737,7 @@ atmosphere = ERA5PrescribedAtmosphere(; start_date, end_date = stop_date, region
 radiation  = ERA5PrescribedRadiation(;  start_date, end_date = stop_date, region,
                                       dir = joinpath(DATA_DIR, "era5"))
 model = OceanOnlyModel(ocean; atmosphere, radiation)
-simulation = Simulation(model; Δt = Δt_baroclinic, stop_time = sim_days * days)
+simulation = Simulation(model; Δt = Δt_baroclinic, stop_time = sim_days * days, stop_iteration = STOP_ITERATION)
 
 # MAB_STAGE=model: everything is built and initialised; report the initial state and stop before time stepping.
 if STAGE == "model"
@@ -860,7 +864,7 @@ simulation.output_writers[:eta_pentad] = JLD2Writer(oc, η_out;
     schedule = FilteredTimeInterval(LanczosKernel(10days; cutoff = 10days); interval = 5days), overwrite_files = fresh_start)
 
 simulation.output_writers[:checkpointer] = Checkpointer(model;
-    schedule = TimeInterval(CHECKPOINT_EVERY), dir = checkpoint_dir,
+    schedule = CHECKPOINT_ITERATIONS > 0 ? IterationInterval(CHECKPOINT_ITERATIONS) : TimeInterval(CHECKPOINT_EVERY), dir = checkpoint_dir,
     prefix = basename(TAG) * "_checkpoint", overwrite_files = false, cleanup = false)
 
 say("running on $nranks ranks: tangential=$TANGENTIAL  Uᵉˣᵗ=$UEXT_MODE  τ_in=$(TAU_IN/86400) day(s)  " *

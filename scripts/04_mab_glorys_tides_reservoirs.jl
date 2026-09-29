@@ -35,7 +35,7 @@ using Oceananigans.Grids: ExponentialDiscretization, znodes, λnodes, φnodes
 using Oceananigans.BoundaryConditions: PerturbationAdvection, NormalRadiation, ObliqueRadiation, TracerReservoir,
                                        GravityWaveRadiationBoundaryCondition,
                                        SurfaceWaveRadiationBoundaryCondition
-using Dates, Printf, Statistics
+using Dates, Printf, Statistics, Serialization
 
 include(joinpath(@__DIR__, "glorys_bathymetry.jl"))
 
@@ -56,7 +56,7 @@ const Nφ = round(Int, (φ_bounds[2] - φ_bounds[1]) / resolution)
 const Nλ_src = round(Int, (data_λ[2] - data_λ[1]) / resolution)
 const Nφ_src = round(Int, (data_φ[2] - data_φ[1]) / resolution)
 
-const start_date = DateTime(2019, 4, 1)
+const start_date = DateTime(get(ENV, "MAB_START_DATE", "2019-04-01"))
 const sim_days   = parse(Int, get(ENV, "MAB_DAYS", "14"))
 const stop_date  = start_date + Day(sim_days)
 
@@ -96,6 +96,7 @@ const CONSISTENT_UBC = get(ENV, "MAB_CONSISTENT_UBC", "true") == "true"
 const SPONGE_VARS  = Symbol.(filter(!isempty, split(get(ENV, "MAB_SPONGE_VARS", ""), ",")))
 const SPONGE_WIDTH = parse(Int, get(ENV, "MAB_SPONGE_WIDTH", "8"))
 const SPONGE_TAU   = parse(Float64, get(ENV, "MAB_SPONGE_TAU", "0.25")) * days
+const SPONGE_SHAPE = get(ENV, "MAB_SPONGE_SHAPE", "cos2")  # "cos2" (default, smooth) | "linear"
 # Surface salinity restoring toward GLORYS as a salt flux with this piston velocity (m/day; 0 turns it off). Over a
 # mixed layer of depth h it damps salinity differences in h / piston: ~30 days for a 15 m summer mixed layer,
 # ~120 days for 60 m, slow enough to keep the model's eddies and fast enough to hold the seasonal cycle.
@@ -104,6 +105,11 @@ const SSS_PISTON   = parse(Float64, get(ENV, "MAB_SSS_PISTON", "0.5")) / days
 # checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
 # can be a Bool, an iteration number, or a filepath (see the comment there)
 const CHECKPOINT_EVERY = parse(Float64, get(ENV, "MAB_CHECKPOINT_EVERY", "5")) * days
+# For exact-restart debugging: MAB_STOP_ITERATION stops the run after that iteration (default: run to MAB_DAYS), and
+# MAB_CHECKPOINT_ITERATIONS writes a checkpoint every that many iterations instead of every MAB_CHECKPOINT_EVERY days.
+const STOP_ITERATION        = parse(Float64, get(ENV, "MAB_STOP_ITERATION", "Inf"))
+const CHECKPOINT_ITERATIONS = parse(Int, get(ENV, "MAB_CHECKPOINT_ITERATIONS", "0"))
+const DT = parse(Float64, get(ENV, "MAB_DT_MINUTES", "5")) * minutes
 
 mkpath(DATA_DIR)
 
@@ -419,6 +425,10 @@ boundary_conditions = (u = u_bcs, v = v_bcs, T = tracer_bcs(fts_T), S = tracer_b
 # side's wet boundary cell along its row (west/east) or column (south/north), so bays and sounds behind land
 # are left alone. Near a corner the mask is the larger of the two sides' values, i.e. it follows the smaller
 # distance, so the seam between the two bands is the diagonal into the corner.
+# MAB_SPONGE_SHAPE: the taper from 1 at the boundary (d=0) to 0 at the sponge edge (d=W). "cos2" (default)
+# has zero slope at both ends; "linear" ramps down at a constant rate and has a slope discontinuity at d=W.
+sponge_shape(d, W) = SPONGE_SHAPE == "linear" ? 1 - d / W : cos(π * d / 2W)^2
+
 function sponge_masks(wet, W)
     Nx, Ny = size(wet)
     d = fill(Inf, Nx, Ny)
@@ -442,7 +452,7 @@ function sponge_masks(wet, W)
             d[i, j] = min(d[i, j], Ny - j + 0.5)
         end
     end
-    μᶜ = [d[i, j] < W ? cos(π * d[i, j] / 2W)^2 : 0.0 for i in 1:Nx, j in 1:Ny]
+    μᶜ = [d[i, j] < W ? sponge_shape(d[i, j], W) : 0.0 for i in 1:Nx, j in 1:Ny]
     # u and v points: the mean of the two neighbouring cell centres (the edge value at the boundary faces)
     μᵘ = [(μᶜ[clamp(i - 1, 1, Nx), j] + μᶜ[clamp(i, 1, Nx), j]) / 2 for i in 1:Nx+1, j in 1:Ny]
     μᵛ = [(μᶜ[i, clamp(j - 1, 1, Ny)] + μᶜ[i, clamp(j, 1, Ny)]) / 2 for i in 1:Nx, j in 1:Ny+1]
@@ -617,10 +627,24 @@ set!((; free_surface = ocean.model.free_surface.displacement),
 
 atmosphere = ERA5PrescribedAtmosphere(; start_date, end_date = stop_date, region,
                                       dir = joinpath(DATA_DIR, "era5"))
+# Debugging: MAB_UNIFORM_P=1 replaces ERA5's surface pressure with a uniform 101325 Pa, removing the atmospheric
+# pressure forcing of the ocean (its gradient) while keeping every other ERA5 field.
+if get(ENV, "MAB_UNIFORM_P", "") == "1"
+    let a = atmosphere
+        p_uniform = FieldTimeSeries{Center, Center, Nothing}(a.grid, a.times)
+        parent(p_uniform) .= 101325
+        global atmosphere = NumericalEarth.Atmospheres.PrescribedAtmosphere(a.grid, a.times;
+            source = a.source, clock = a.clock, velocities = a.velocities, temperature = a.temperature,
+            specific_humidity = a.specific_humidity, pressure = p_uniform, precipitation_flux = a.precipitation_flux,
+            thermodynamics_parameters = a.thermodynamics_parameters,
+            surface_layer_height = a.surface_layer_height, boundary_layer_height = a.boundary_layer_height)
+    end
+    @info "MAB_UNIFORM_P: atmospheric pressure set to a uniform 101325 Pa"
+end
 radiation  = ERA5PrescribedRadiation(;  start_date, end_date = stop_date, region,
                                       dir = joinpath(DATA_DIR, "era5"))
 model = OceanOnlyModel(ocean; atmosphere, radiation)
-simulation = Simulation(model; Δt = 5minutes, stop_time = sim_days * days)
+simulation = Simulation(model; Δt = DT, stop_time = sim_days * days, stop_iteration = STOP_ITERATION)
 
 wall = Ref(time())
 function progress(sim)
@@ -634,6 +658,79 @@ function progress(sim)
     return nothing
 end
 add_callback!(simulation, progress, TimeInterval(6hours))
+
+# Debugging: MAB_FLUXDUMP=file writes, every 30 minutes, the minimum, maximum and mean over the exchange grid of every
+# interpolated atmospheric state field, every atmosphere-ocean flux and every net ocean flux.
+const FLUXDUMP = get(ENV, "MAB_FLUXDUMP", "")
+if !isempty(FLUXDUMP)
+    fluxdump_io = open(FLUXDUMP, "w")
+    function dump_fluxes(sim)
+        cm = sim.model
+        groups = ("atm" => cm.interfaces.exchanger.atmosphere.state,
+                  "ao"  => cm.interfaces.atmosphere_ocean_interface.fluxes,
+                  "net" => cm.interfaces.net_fluxes.ocean)
+        hours = cm.clock.time / 3600
+        named(g) = g isa NamedTuple ? pairs(g) : (n => getproperty(g, n) for n in propertynames(g))
+        for (prefix, group) in groups, (name, field) in named(group)
+            values = try
+                vec(Array(interior(field)))
+            catch
+                continue
+            end
+            finite = filter(isfinite, values)
+            nonfinite = length(values) - length(finite)
+            isempty(finite) && continue
+            lo = findmin(x -> isfinite(x) ? x : Inf, values)
+            hi = findmax(x -> isfinite(x) ? x : -Inf, values)
+            ci = CartesianIndices(size(interior(field)))
+            @printf(fluxdump_io, "%8.3f %-28s % .6e % .6e % .6e %d  min@%s max@%s\n", hours, "$prefix.$name",
+                    lo[1], hi[1], sum(finite) / length(finite), nonfinite,
+                    Tuple(ci[lo[2]])[1:2], Tuple(ci[hi[2]])[1:2])
+        end
+        # The barotropic pressure potential the ocean is forced with, and its largest jump between wet neighbours
+        potential = NumericalEarth.Oceans.forcing_barotropic_potential(cm.ocean)
+        if !isnothing(potential)
+            Nx, Ny = size(grid, 1), size(grid, 2)
+            P = [potential[i, j, 1] for i in 1:Nx, j in 1:Ny]  # offset array: index the interior directly
+            wet = [!Oceananigans.Grids.inactive_cell(i, j, grid.Nz, grid) for i in 1:Nx, j in 1:Ny]
+            δx = maximum(abs(P[i+1, j] - P[i, j]) for i in 1:Nx-1, j in 1:Ny if wet[i, j] && wet[i+1, j])
+            δy = maximum(abs(P[i, j+1] - P[i, j]) for i in 1:Nx, j in 1:Ny-1 if wet[i, j] && wet[i, j+1])
+            Pwet = P[wet]
+            @printf(fluxdump_io, "%8.3f %-28s % .6e % .6e % .6e max|δx|=%.4e max|δy|=%.4e\n", hours, "potential(wet)",
+                    minimum(Pwet), maximum(Pwet), sum(Pwet) / length(Pwet), δx, δy)
+        end
+        flush(fluxdump_io)
+    end
+    add_callback!(simulation, dump_fluxes, TimeInterval(parse(Float64, get(ENV, "MAB_FLUXDUMP_MINUTES", "30")) * minutes))
+end
+
+# Debugging: MAB_STATEDUMP=file writes, every MAB_STATEDUMP_MINUTES (default 30), a full-precision checksum of the
+# ocean state (to compare repeats bit for bit) and the value and (i, j, k) of the extremes over wet cells.
+const STATEDUMP = get(ENV, "MAB_STATEDUMP", "")
+if !isempty(STATEDUMP)
+    statedump_io = open(STATEDUMP, "w")
+    wet3 = [!Oceananigans.Grids.inactive_cell(i, j, k, grid) for i in 1:size(grid, 1), j in 1:size(grid, 2), k in 1:size(grid, 3)]
+    function dump_state(sim)
+        om = sim.model.ocean.model
+        hours = om.clock.time / 3600
+        fields = (T = om.tracers.T, S = om.tracers.S, e = om.tracers.e, u = om.velocities.u, v = om.velocities.v)
+        @printf(statedump_io, "%9.4f sum", hours)
+        for (name, f) in pairs(fields)
+            @printf(statedump_io, " %s=%.17e", name, sum(Array(interior(f))[1:size(grid, 1), 1:size(grid, 2), :]))
+        end
+        @printf(statedump_io, " η=%.17e\n", sum(Array(interior(om.free_surface.displacement))))
+        for (name, f) in pairs(fields)
+            a = Array(interior(f))[1:size(grid, 1), 1:size(grid, 2), :]
+            a = ifelse.(wet3, a, NaN)
+            lo = findmin(x -> isnan(x) ? Inf : x, a)
+            hi = findmax(x -> isnan(x) ? -Inf : x, a)
+            @printf(statedump_io, "%9.4f %s min=% .6e at %s max=% .6e at %s\n", hours, name,
+                    lo[1], Tuple(lo[2]), hi[1], Tuple(hi[2]))
+        end
+        flush(statedump_io)
+    end
+    add_callback!(simulation, dump_state, TimeInterval(parse(Float64, get(ENV, "MAB_STATEDUMP_MINUTES", "30")) * minutes))
+end
 
 const λf = λnodes(grid, Face());   const λc = λnodes(grid, Center())
 const φf = φnodes(grid, Face());   const φc = φnodes(grid, Center())
@@ -733,11 +830,93 @@ simulation.output_writers[:eta_pentad] = JLD2Writer(oc, η_out;
     schedule = FilteredTimeInterval(LanczosKernel(10days; cutoff = 10days); interval = 5days), overwrite_files = fresh_start)
 
 simulation.output_writers[:checkpointer] = Checkpointer(model;
-    schedule = TimeInterval(CHECKPOINT_EVERY), dir = checkpoint_dir,
+    schedule = CHECKPOINT_ITERATIONS > 0 ? IterationInterval(CHECKPOINT_ITERATIONS) : TimeInterval(CHECKPOINT_EVERY), dir = checkpoint_dir,
     prefix = basename(TAG) * "_checkpoint", overwrite_files = false, cleanup = false)
 
 @info "running: tangential=$TANGENTIAL  Uᵉˣᵗ=$UEXT_MODE  τ_in=$(TAU_IN/86400) day(s)  " *
       "tides=$(join(TIDE_CONSTITUENTS, ",")) velocity=$VELOCITY_SCHEME$(VELOCITY_SCHEME == "oblique" ? "(τ_in=$(OBLIQUE_TAU_IN/days)d, τ_out=$(OBLIQUE_TAU_OUT/days)d, w=$PHASE_SPEED_WEIGHT)" : "") consistent_ubc=$CONSISTENT_UBC tracers=$TRACER_SCHEME reservoir(L_in=$RESERVOIR_L_IN, L_out=$RESERVOIR_L_OUT)  " *
       "$(sim_days) days  pickup=$PICKUP"
+# Exact-restart debugging: MAB_SNAPSHOT=file writes every number and array reachable from the state the checkpoint does not
+# hold (interfaces, atmosphere, radiation, ocean boundary conditions and forcing) to a Serialization file, after the run
+# (or after the MAB_DUMP_RESTORE restore), so an uninterrupted run and a restored one can be compared.
+function state_snapshot(roots)
+    out = Dict{String, Any}()
+    seen = IdDict{Any, Bool}()
+    skipped = Union{Function, Symbol, AbstractString, Type, Nothing, Missing, Oceananigans.Grids.AbstractGrid,
+                    Oceananigans.AbstractModel, Oceananigans.Simulations.Simulation}
+    FTS = Oceananigans.OutputReaders.FieldTimeSeries
+    function walk(x, path, depth)
+        depth > 14 && return
+        try
+            if x isa Number
+                out[path] = x
+            elseif x isa skipped
+                return
+            elseif x isa FTS
+                walk_fields(x, path, depth)     # its data window, times and backend, not element-wise indexing
+            elseif x isa Oceananigans.Fields.Field
+                walk(parent(x), path * ".data", depth + 1)
+            elseif x isa AbstractArray{<:Number}
+                length(x) < 5 * 10^7 && (out[path] = copy(parent(x)))
+            elseif x isa Union{Tuple, NamedTuple}
+                for (k, v) in pairs(x)
+                    walk(v, path * "." * string(k), depth + 1)
+                end
+            elseif x isa AbstractDict
+                for (k, v) in x
+                    walk(v, path * "[" * string(k) * "]", depth + 1)
+                end
+            elseif isstructtype(typeof(x))
+                walk_fields(x, path, depth)
+            end
+        catch e
+            out[path * ".ERROR"] = first(sprint(showerror, e), 120)
+        end
+    end
+    function walk_fields(x, path, depth)
+        if ismutable(x)
+            haskey(seen, x) && return
+            seen[x] = true
+        end
+        for name in fieldnames(typeof(x))
+            name in (:grid, :architecture) && continue
+            isdefined(x, name) || continue
+            walk(getfield(x, name), path * "." * string(name), depth + 1)
+        end
+    end
+    for (name, x) in pairs(roots)
+        walk(x, string(name), 0)
+    end
+    return out
+end
+
+function write_snapshot(model, ocean)
+    file = get(ENV, "MAB_SNAPSHOT", "")
+    isempty(file) && return
+    om = ocean.model
+    roots = (; interfaces = model.interfaces, atmosphere = model.atmosphere, radiation = model.radiation,
+             velocity_bcs = map(f -> f.boundary_conditions, om.velocities),
+             tracer_bcs = map(f -> f.boundary_conditions, om.tracers),
+             forcing = om.forcing, clock = model.clock,
+             ocean_model = (; (name => getfield(om, name) for name in fieldnames(typeof(om))
+                               if name ∉ (:grid, :architecture, :clock, :output_writers, :diagnostics, :callbacks))...))
+    snap = state_snapshot(roots)
+    Serialization.serialize(file, snap)
+    @info "snapshot: $(length(snap)) entries written to $file"
+end
+
+# Exact-restart debugging: MAB_DUMP_RESTORE=1 restores from the pickup checkpoint, initializes, writes a checkpoint of the
+# restored state (zero steps taken) and exits, so it can be diffed against the checkpoint it came from.
+if get(ENV, "MAB_DUMP_RESTORE", "0") == "1"
+    PICKUP isa Integer ? set!(simulation; iteration = PICKUP) : set!(simulation; checkpoint = PICKUP)
+    simulation.initialized = false
+    initialize!(simulation)
+    Oceananigans.OutputWriters.checkpoint(simulation)
+    write_snapshot(model, ocean)
+    println("
+✅ restored and dumped — $(TAG)")
+    exit()
+end
 run!(simulation; pickup = PICKUP, checkpoint_at_end = true)
+write_snapshot(model, ocean)
 println("\n✅ done — $(TAG)")
