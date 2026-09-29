@@ -2,6 +2,7 @@
 # maps of both depths, from a run of 04_mab_glorys_tides_reservoirs.jl. Uses the de-tided daily full-depth output
 # (`<tag>_volume_daily.jld2`), which carries its own grid, so it works for any vertical grid. Usage:
 #   MAB_TAG=mab_H90 MAB_DAYS=30,60,87 julia --project=. scripts/transects_vs_glorys.jl
+# MAB_TAG:      a run tag in ~/Data/mab_glorys_obc, or an absolute path prefix; script 05's per-rank output is combined
 # MAB_DAYS:     days to analyse (default: the last daily frame)
 # MAB_SECTIONS: "lat:<φ>" (zonal) or "lon:<λ>" (meridional) sections, comma separated
 # MAB_ZMAX:     depth shown in the sections (m)
@@ -26,8 +27,38 @@ const eos = SWP.TEOS10.TEOS10EquationOfState()
 σ₀(T, S) = SWP.ρ(T, S, 0, eos) - 1000
 
 # ---------------- model ----------------
-vol = joinpath(OUT, TAG * "_volume_daily.jld2")
-TV = FieldTimeSeries(vol, "T"; backend = OnDisk()); SV = FieldTimeSeries(vol, "S"; backend = OnDisk())
+# MAB_TAG is a run tag in ~/Data/mab_glorys_obc or, as the run scripts take it, an absolute path prefix.
+const PREFIX = isabspath(TAG) ? TAG : joinpath(OUT, TAG)
+const FIGDIR = dirname(PREFIX)
+vol = PREFIX * "_volume_daily.jld2"
+
+# Script 05 writes one file per MPI rank (`_rank<r>`), and Oceananigans combines them on an ImmersedBoundaryGrid only
+# when given the global grid, so that grid is rebuilt from the ranks' own grids (slabs in x). Reading those grids needs
+# the MPI environment the run used (e.g. /t0/workdir/enrique/mpi05_ib on triton).
+function global_grid(vol)
+    JLD2 = Base.loaded_modules[only(id for id in keys(Base.loaded_modules) if id.name == "JLD2")]
+    stem = basename(splitext(vol)[1])
+    paths = filter(f -> occursin(Regex("^" * stem * "_rank\\d+\\.jld2\$"), basename(f)), readdir(dirname(vol); join = true))
+    grids = [JLD2.jldopen(f -> f["serialized/grid"], p) for p in paths]
+    ugs = [g.underlying_grid for g in grids]
+    order = sortperm([ug.λᶠᵃᵃ[1] for ug in ugs])
+    function bottom(r)
+        b = grids[r].immersed_boundary.bottom_height
+        n, m = ugs[r].Nx, ugs[r].Ny
+        return ndims(b) == 2 ? collect(b[1:n, 1:m]) : collect(b[1:n, 1:m, 1])
+    end
+    bh = cat([bottom(r) for r in order]...; dims = 1)
+    first_ug, last_ug = ugs[order[1]], ugs[order[end]]
+    Ny, Nz = first_ug.Ny, first_ug.Nz
+    g = LatitudeLongitudeGrid(CPU(); size = (size(bh, 1), Ny, Nz),
+                              longitude = (first_ug.λᶠᵃᵃ[1], last_ug.λᶠᵃᵃ[last_ug.Nx + 1]),
+                              latitude = (first_ug.φᵃᶠᵃ[1], first_ug.φᵃᶠᵃ[Ny + 1]),
+                              z = collect(znodes(first_ug, Face())), halo = Oceananigans.Grids.halo_size(first_ug))
+    return ImmersedBoundaryGrid(g, GridFittedBottom(bh))
+end
+
+grid_kw = isfile(vol) ? (;) : (; grid = global_grid(vol))
+TV = FieldTimeSeries(vol, "T"; backend = OnDisk(), grid_kw...); SV = FieldTimeSeries(vol, "S"; backend = OnDisk(), grid_kw...)
 grid = TV.grid; ug = grid.underlying_grid
 Nx, Ny, Nz = size(ug)
 λ = collect(λnodes(ug, Center())); φ = collect(φnodes(ug, Center())); zc = collect(znodes(ug, Center()))
@@ -103,7 +134,7 @@ region_names = ("shelf (<200 m)", "slope (200-1000 m)", "deep (>1000 m)")
 
 for dwant in days
     n = argmin(abs.(tdays .- dwant)); d = tdays[n]
-    @printf("\n==== %s, day %.1f (%s) ====\n", TAG, d, Dates.format(start_date + Second(round(Int, d * 86400)), "yyyy-mm-dd HH:MM"))
+    @printf("\n==== %s, day %.1f (%s) ====\n", basename(PREFIX), d, Dates.format(start_date + Second(round(Int, d * 86400)), "yyyy-mm-dd HH:MM"))
     T = Array(interior(TV[n])); S = Array(interior(SV[n]))
     T[.!wet3] .= NaN; S[.!wet3] .= NaN
     lon, lat, dep, GT = glorys_at("thetao", d)
@@ -130,7 +161,7 @@ for dwant in days
     end
 
     fig = Figure(size = (1500, 900), fontsize = 16)
-    Label(fig[0, 1:3], @sprintf("%s day %.1f: mixed-layer depth (top) and seasonal thermocline depth (bottom)", TAG, d), fontsize = 20)
+    Label(fig[0, 1:3], @sprintf("%s day %.1f: mixed-layer depth (top) and seasonal thermocline depth (bottom)", basename(PREFIX), d), fontsize = 20)
     for (row, (A, name, cr)) in enumerate(((mld, "MLD", (0, 100)), (tcl, "thermocline", (0, 150))))
         for (col, (X, t)) in enumerate(((A[:, :, 1], "model"), (A[:, :, 2], "GLORYS"), (A[:, :, 1] .- A[:, :, 2], "model − GLORYS")))
             ax = Axis(fig[2row - 1, col], title = "$(name) (m): $(t)", aspect = DataAspect())
@@ -142,12 +173,12 @@ for dwant in days
             (col == 1 || col == 3) && Colorbar(fig[2row, col == 1 ? (1:2) : 3], hm; vertical = false, flipaxis = false)
         end
     end
-    out = joinpath(OUT, @sprintf("%s_mld_thermocline_day%02d.png", TAG, round(Int, d)))
+    out = joinpath(FIGDIR, @sprintf("%s_mld_thermocline_day%02d.png", basename(PREFIX), round(Int, d)))
     save(out, fig; px_per_unit = 1.2); println("saved ", out)
 
     # sections
     fig = Figure(size = (1900, 420 * length(SECTIONS)), fontsize = 15)
-    Label(fig[0, 1:5], @sprintf("%s day %.1f: temperature and salinity sections, model vs GLORYS (white: mixed layer, dashed: thermocline)", TAG, d), fontsize = 19)
+    Label(fig[0, 1:5], @sprintf("%s day %.1f: temperature and salinity sections, model vs GLORYS (white: mixed layer, dashed: thermocline)", basename(PREFIX), d), fontsize = 19)
     println("\nsection                upper $(round(Int, ZMAX)) m RMS model − GLORYS:  T (°C)   S")
     for (row, (kind, v)) in enumerate(SECTIONS)
         if kind === :lat
@@ -187,6 +218,6 @@ for dwant in days
             (col == 2 || col == 4) && Colorbar(fig[row, 5 + (col == 4)], hm; label = col == 2 ? "°C" : "")
         end
     end
-    out = joinpath(OUT, @sprintf("%s_sections_day%02d.png", TAG, round(Int, d)))
+    out = joinpath(FIGDIR, @sprintf("%s_sections_day%02d.png", basename(PREFIX), round(Int, d)))
     save(out, fig; px_per_unit = 1.2); println("saved ", out)
 end
