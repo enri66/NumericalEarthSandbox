@@ -21,7 +21,8 @@ pieces work their way through review:
 | Split Runge-Kutta momentum tendencies at each substep (exact restarts) | [CliMA/Oceananigans.jl#6090](https://github.com/CliMA/Oceananigans.jl/pull/6090) | open |
 | `ObliqueRadiation`: tangential velocities radiated with the normal velocity's phase speed | [CliMA/Oceananigans.jl#6091](https://github.com/CliMA/Oceananigans.jl/pull/6091) | open |
 | CATKE bottom mixing length coefficient `Cᵇ` | [CliMA/Oceananigans.jl#6024](https://github.com/CliMA/Oceananigans.jl/pull/6024) | open |
-| Open boundary scheme state in checkpoints; anchor open boundaries once per iteration | fork branches `checkpoint-boundary-state`, `obc-anchor-once-per-iteration` | no PR yet |
+| Anchor open boundary schemes at most once per iteration | [CliMA/Oceananigans.jl#6092](https://github.com/CliMA/Oceananigans.jl/pull/6092) | open |
+| Open boundary scheme state in checkpoints | fork branch `checkpoint-boundary-state` | no PR yet |
 | `TPXO10Atlas`, `earth_tidal_harmonics` (Earth's tidal astronomy) | [NumericalEarth/NumericalEarth.jl#681](https://github.com/NumericalEarth/NumericalEarth.jl/pull/681) | open |
 | Each prescribed atmosphere field interpolated on its own time axis | [NumericalEarth/NumericalEarth.jl#711](https://github.com/NumericalEarth/NumericalEarth.jl/pull/711) | open |
 
