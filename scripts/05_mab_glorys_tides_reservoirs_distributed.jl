@@ -144,6 +144,12 @@ const SPONGE_CORNER = get(ENV, "MAB_SPONGE_CORNER", "product")  # "product" (def
 # mixed layer of depth h it damps salinity differences in h / piston: ~30 days for a 15 m summer mixed layer,
 # ~120 days for 60 m, slow enough to keep the model's eddies and fast enough to hold the seasonal cycle.
 const SSS_PISTON   = parse(Float64, get(ENV, "MAB_SSS_PISTON", "0.5")) / days
+# Flood ERA5 from the ocean over land before interpolating it to the model (see era5_land_flooding.jl), so coastal
+# cells do not take land values: "true" (default) or "false" (ERA5 as delivered)
+const ERA5_FLOOD = get(ENV, "MAB_ERA5_FLOOD", "true") == "true"
+ERA5_FLOOD && include(joinpath(@__DIR__, "era5_land_flooding.jl"))
+# Filling one ERA5 file takes well under a millisecond, so it is redone on every read rather than cached on disk
+const ERA5_KW = ERA5_FLOOD ? (; inpainting = ERA5_FLOODING, cache_inpainted_data = false) : (;)
 
 # checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
 # can be a Bool, an iteration number, or a filepath (see the comment there)
@@ -739,9 +745,9 @@ set_from_frame!(ocean.model.tracers.S,    fts_S[1])
 set_from_frame!(ocean.model.free_surface.displacement, fts_η[1])
 
 atmosphere = ERA5PrescribedAtmosphere(; start_date, end_date = stop_date, region,
-                                      dir = joinpath(DATA_DIR, "era5"))
+                                      dir = joinpath(DATA_DIR, "era5"), ERA5_KW...)
 radiation  = ERA5PrescribedRadiation(;  start_date, end_date = stop_date, region,
-                                      dir = joinpath(DATA_DIR, "era5"))
+                                      dir = joinpath(DATA_DIR, "era5"), ERA5_KW...)
 model = OceanOnlyModel(ocean; atmosphere, radiation)
 simulation = Simulation(model; Δt = Δt_baroclinic, stop_time = sim_days * days, stop_iteration = STOP_ITERATION)
 

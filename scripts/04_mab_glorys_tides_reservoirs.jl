@@ -102,6 +102,12 @@ const SPONGE_CORNER = get(ENV, "MAB_SPONGE_CORNER", "product")  # "product" (def
 # mixed layer of depth h it damps salinity differences in h / piston: ~30 days for a 15 m summer mixed layer,
 # ~120 days for 60 m, slow enough to keep the model's eddies and fast enough to hold the seasonal cycle.
 const SSS_PISTON   = parse(Float64, get(ENV, "MAB_SSS_PISTON", "0.5")) / days
+# Flood ERA5 from the ocean over land before interpolating it to the model (see era5_land_flooding.jl), so coastal
+# cells do not take land values: "true" (default) or "false" (ERA5 as delivered)
+const ERA5_FLOOD = get(ENV, "MAB_ERA5_FLOOD", "true") == "true"
+ERA5_FLOOD && include(joinpath(@__DIR__, "era5_land_flooding.jl"))
+# Filling one ERA5 file takes well under a millisecond, so it is redone on every read rather than cached on disk
+const ERA5_KW = ERA5_FLOOD ? (; inpainting = ERA5_FLOODING, cache_inpainted_data = false) : (;)
 
 # checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
 # can be a Bool, an iteration number, or a filepath (see the comment there)
@@ -632,7 +638,7 @@ set!((; free_surface = ocean.model.free_surface.displacement),
      MetadataSet(:free_surface; dataset = glorys, date = start_date, dir = DATA_DIR, region))
 
 atmosphere = ERA5PrescribedAtmosphere(; start_date, end_date = stop_date, region,
-                                      dir = joinpath(DATA_DIR, "era5"))
+                                      dir = joinpath(DATA_DIR, "era5"), ERA5_KW...)
 # Debugging: MAB_UNIFORM_P=1 replaces ERA5's surface pressure with a uniform 101325 Pa, removing the atmospheric
 # pressure forcing of the ocean (its gradient) while keeping every other ERA5 field.
 if get(ENV, "MAB_UNIFORM_P", "") == "1"
@@ -648,7 +654,7 @@ if get(ENV, "MAB_UNIFORM_P", "") == "1"
     @info "MAB_UNIFORM_P: atmospheric pressure set to a uniform 101325 Pa"
 end
 radiation  = ERA5PrescribedRadiation(;  start_date, end_date = stop_date, region,
-                                      dir = joinpath(DATA_DIR, "era5"))
+                                      dir = joinpath(DATA_DIR, "era5"), ERA5_KW...)
 model = OceanOnlyModel(ocean; atmosphere, radiation)
 simulation = Simulation(model; Δt = DT, stop_time = sim_days * days, stop_iteration = STOP_ITERATION)
 
