@@ -32,6 +32,7 @@ using CopernicusClimateDataStore    # activates the ERA5 download backend
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: ExponentialDiscretization, znodes, λnodes, φnodes
+using Oceananigans.TurbulenceClosures: TKEDissipationVerticalDiffusivity
 using Oceananigans.BoundaryConditions: PerturbationAdvection, NormalRadiation, ObliqueRadiation, TracerReservoir,
                                        GravityWaveRadiationBoundaryCondition,
                                        SurfaceWaveRadiationBoundaryCondition
@@ -112,6 +113,15 @@ const ERA5_KW = ERA5_FLOOD ? (; inpainting = ERA5_FLOODING, cache_inpainted_data
 # checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
 # can be a Bool, an iteration number, or a filepath (see the comment there)
 const CHECKPOINT_EVERY = parse(Float64, get(ENV, "MAB_CHECKPOINT_EVERY", "5")) * days
+
+# Vertical mixing: "catke" (default, NumericalEarth's CATKEVerticalDiffusivity) or "kepsilon" (the two-equation k-ε
+# model, TKEDissipationVerticalDiffusivity). k-ε's equations are only stepped with the Adams-Bashforth time stepper,
+# so MAB_TIMESTEPPER defaults to QuasiAdamsBashforth2 for it and to SplitRungeKutta3 otherwise.
+const CLOSURE     = get(ENV, "MAB_CLOSURE", "catke")
+const TIMESTEPPER = Symbol(get(ENV, "MAB_TIMESTEPPER", CLOSURE == "kepsilon" ? "QuasiAdamsBashforth2" : "SplitRungeKutta3"))
+CLOSURE in ("catke", "kepsilon") || error("MAB_CLOSURE must be catke or kepsilon, got $CLOSURE")
+CLOSURE == "kepsilon" && TIMESTEPPER != :QuasiAdamsBashforth2 &&
+    error("MAB_CLOSURE=kepsilon needs MAB_TIMESTEPPER=QuasiAdamsBashforth2")
 # For exact-restart debugging: MAB_STOP_ITERATION stops the run after that iteration (default: run to MAB_DAYS), and
 # MAB_CHECKPOINT_ITERATIONS writes a checkpoint every that many iterations instead of every MAB_CHECKPOINT_EVERY days.
 const STOP_ITERATION        = parse(Float64, get(ENV, "MAB_STOP_ITERATION", "Inf"))
@@ -595,7 +605,8 @@ additional_surface_fluxes = isnothing(sss_restoring) ? NamedTuple() : (; S = sss
 isnothing(sss_restoring) || @info @sprintf("surface salinity restoring toward GLORYS: piston velocity %.2f m/day", SSS_PISTON * days)
 
 # ---------------- ocean simulation: GLORYS boundaries + equilibrium tidal body force ----------------
-ocean = ocean_simulation(grid; boundary_conditions, forcing, additional_surface_fluxes)
+closure_kw = CLOSURE == "kepsilon" ? (; closure = TKEDissipationVerticalDiffusivity()) : (;)
+ocean = ocean_simulation(grid; boundary_conditions, forcing, additional_surface_fluxes, timestepper = TIMESTEPPER, closure_kw...)
 
 if CONSISTENT_UBC
     vel = ocean.model.velocities
