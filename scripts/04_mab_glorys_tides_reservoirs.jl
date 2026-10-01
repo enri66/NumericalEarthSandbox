@@ -852,6 +852,20 @@ simulation.output_writers[:eta_pentad] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta_pentad.jld2"),
     schedule = FilteredTimeInterval(LanczosKernel(10days; cutoff = 10days); interval = 5days), overwrite_files = fresh_start)
 
+# Daily means of the surface fluxes: the atmosphere-ocean turbulent fluxes from the bulk formulas (W/m², kg/m²/s, N/m²,
+# m/s) and the net fluxes the ocean receives (kinematic: K m/s, psu m/s, m²/s²), for comparison with ERA5's own fluxes.
+# MAB_FLUX_OUTPUT=false turns this off.
+if get(ENV, "MAB_FLUX_OUTPUT", "true") == "true"
+    ao  = model.interfaces.atmosphere_ocean_interface.fluxes
+    net = model.interfaces.net_fluxes.ocean
+    flux_out = (latent_heat = ao.latent_heat, sensible_heat = ao.sensible_heat, evaporation = ao.water_vapor,
+                τx = ao.x_momentum, τy = ao.y_momentum, friction_velocity = ao.friction_velocity,
+                Jᵀ = net.T, Jˢ = net.S, Jᵘ = net.u, Jᵛ = net.v)
+    simulation.output_writers[:fluxes_daily] = JLD2Writer(oc, flux_out;
+        filename = joinpath(@__DIR__, "..", TAG * "_fluxes_daily.jld2"),
+        schedule = AveragedTimeInterval(1days), overwrite_files = fresh_start)
+end
+
 simulation.output_writers[:checkpointer] = Checkpointer(model;
     schedule = CHECKPOINT_ITERATIONS > 0 ? IterationInterval(CHECKPOINT_ITERATIONS) : TimeInterval(CHECKPOINT_EVERY), dir = checkpoint_dir,
     prefix = basename(TAG) * "_checkpoint", overwrite_files = false, cleanup = false)
