@@ -8,7 +8,8 @@
 #
 #   julia --project=. scripts/download_era5_year.jl
 #
-# ERA5_START / ERA5_END (default 2019-04-01T00 / 2020-04-01T01) and MAB_DATA_DIR select the range and cache.
+# ERA5_START / ERA5_END (default 2019-04-01T00 / 2020-04-01T01) and MAB_DATA_DIR select the range and cache;
+# ERA5_NAMES (comma-separated NumericalEarth variable names) replaces the forcing variables.
 
 using NumericalEarth, Dates, Printf
 using CopernicusClimateDataStore    # activates the ERA5 download backend
@@ -21,8 +22,9 @@ const dir      = joinpath(DATA_DIR, "era5")
 const region   = BoundingBox(longitude = (-76.0, -64.0), latitude = (34.0, 42.0))   # same box as script 04
 const dataset  = ERA5HourlySingleLevel()
 
-# ERA5PrescribedAtmosphere + ERA5PrescribedRadiation
-const names = (:eastward_velocity, :northward_velocity, :temperature, :dewpoint_temperature,
+# ERA5PrescribedAtmosphere + ERA5PrescribedRadiation, or the comma-separated NumericalEarth names in ERA5_NAMES
+const names = haskey(ENV, "ERA5_NAMES") ? Tuple(Symbol.(split(ENV["ERA5_NAMES"], ","))) :
+              (:eastward_velocity, :northward_velocity, :temperature, :dewpoint_temperature,
                :surface_pressure, :total_precipitation,
                :downwelling_shortwave_radiation, :downwelling_longwave_radiation)
 
