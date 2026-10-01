@@ -33,6 +33,7 @@ using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: ExponentialDiscretization, znodes, λnodes, φnodes
 using Oceananigans.TurbulenceClosures: TKEDissipationVerticalDiffusivity
+using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities: CATKEMixingLength, CATKEEquation
 using Oceananigans.BoundaryConditions: PerturbationAdvection, NormalRadiation, ObliqueRadiation, TracerReservoir,
                                        GravityWaveRadiationBoundaryCondition,
                                        SurfaceWaveRadiationBoundaryCondition
@@ -122,6 +123,11 @@ const TIMESTEPPER = Symbol(get(ENV, "MAB_TIMESTEPPER", CLOSURE == "kepsilon" ? "
 CLOSURE in ("catke", "kepsilon") || error("MAB_CLOSURE must be catke or kepsilon, got $CLOSURE")
 CLOSURE == "kepsilon" && TIMESTEPPER != :QuasiAdamsBashforth2 &&
     error("MAB_CLOSURE=kepsilon needs MAB_TIMESTEPPER=QuasiAdamsBashforth2")
+# CATKE parameter changes for sensitivity runs, e.g. MAB_CATKE="Cᵉc=0,Cˢ=0.967": fields of CATKEMixingLength or
+# CATKEEquation; the rest keep NumericalEarth's defaults (Oceananigans' calibrated values, with Cᵂϵ = 1)
+const CATKE_CHANGES = Dict(Symbol(strip(first(kv))) => parse(Float64, last(kv))
+                           for kv in split.(filter(!isempty, split(get(ENV, "MAB_CATKE", ""), ",")), "="))
+CLOSURE == "kepsilon" && !isempty(CATKE_CHANGES) && error("MAB_CATKE needs MAB_CLOSURE=catke")
 # For exact-restart debugging: MAB_STOP_ITERATION stops the run after that iteration (default: run to MAB_DAYS), and
 # MAB_CHECKPOINT_ITERATIONS writes a checkpoint every that many iterations instead of every MAB_CHECKPOINT_EVERY days.
 const STOP_ITERATION        = parse(Float64, get(ENV, "MAB_STOP_ITERATION", "Inf"))
@@ -605,7 +611,19 @@ additional_surface_fluxes = isnothing(sss_restoring) ? NamedTuple() : (; S = sss
 isnothing(sss_restoring) || @info @sprintf("surface salinity restoring toward GLORYS: piston velocity %.2f m/day", SSS_PISTON * days)
 
 # ---------------- ocean simulation: GLORYS boundaries + equilibrium tidal body force ----------------
-closure_kw = CLOSURE == "kepsilon" ? (; closure = TKEDissipationVerticalDiffusivity()) : (;)
+function catke_closure(changes)
+    ml  = filter(p -> first(p) in fieldnames(CATKEMixingLength), changes)
+    tke = filter(p -> first(p) in fieldnames(CATKEEquation), changes)
+    unknown = setdiff(keys(changes), keys(ml), keys(tke))
+    isempty(unknown) || error("MAB_CATKE: not CATKE parameters: $(join(unknown, ", "))")
+    return CATKEVerticalDiffusivity(VerticallyImplicitTimeDiscretization();
+                                    mixing_length = CATKEMixingLength(; ml...),
+                                    turbulent_kinetic_energy_equation = CATKEEquation(; Cᵂϵ = 1.0, tke...))
+end
+
+closure_kw = CLOSURE == "kepsilon"     ? (; closure = TKEDissipationVerticalDiffusivity()) :
+             isempty(CATKE_CHANGES) ? (;) : (; closure = catke_closure(CATKE_CHANGES))
+isempty(CATKE_CHANGES) || @info "CATKE parameter changes: " * join(["$k = $v" for (k, v) in CATKE_CHANGES], ", ")
 ocean = ocean_simulation(grid; boundary_conditions, forcing, additional_surface_fluxes, timestepper = TIMESTEPPER, closure_kw...)
 
 if CONSISTENT_UBC

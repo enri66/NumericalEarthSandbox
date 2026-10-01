@@ -50,6 +50,7 @@ using CopernicusClimateDataStore    # activates the ERA5 download backend
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: ExponentialDiscretization, znodes, λnodes, φnodes
+using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities: CATKEMixingLength, CATKEEquation
 using Oceananigans.BoundaryConditions: PerturbationAdvection, NormalRadiation, ObliqueRadiation, TracerReservoir,
                                        GravityWaveRadiationBoundaryCondition,
                                        SurfaceWaveRadiationBoundaryCondition
@@ -150,6 +151,11 @@ const ERA5_FLOOD = get(ENV, "MAB_ERA5_FLOOD", "true") == "true"
 ERA5_FLOOD && include(joinpath(@__DIR__, "era5_land_flooding.jl"))
 # Filling one ERA5 file takes well under a millisecond, so it is redone on every read rather than cached on disk
 const ERA5_KW = ERA5_FLOOD ? (; inpainting = ERA5_FLOODING, cache_inpainted_data = false) : (;)
+
+# CATKE parameter changes for sensitivity runs, e.g. MAB_CATKE="Cᵉc=0,Cˢ=0.967": fields of CATKEMixingLength or
+# CATKEEquation; the rest keep NumericalEarth's defaults (Oceananigans' calibrated values, with Cᵂϵ = 1)
+const CATKE_CHANGES = Dict(Symbol(strip(first(kv))) => parse(Float64, last(kv))
+                           for kv in split.(filter(!isempty, split(get(ENV, "MAB_CATKE", ""), ",")), "="))
 
 # checkpoint/restart — PICKUP itself is parsed further down, right before it's used, since it
 # can be a Bool, an iteration number, or a filepath (see the comment there)
@@ -687,7 +693,19 @@ const SUBSTEPS = parse(Int, get(ENV, "MAB_SUBSTEPS", string(barotropic_substeps(
 say("split-explicit free surface: $SUBSTEPS barotropic substeps per Δt = $(Δt_baroclinic) s (deepest water $(round(Int, -minimum(bh))) m)")
 free_surface = SplitExplicitFreeSurface(grid; substeps = SUBSTEPS)
 
-ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes)
+function catke_closure(changes)
+    ml  = filter(p -> first(p) in fieldnames(CATKEMixingLength), changes)
+    tke = filter(p -> first(p) in fieldnames(CATKEEquation), changes)
+    unknown = setdiff(keys(changes), keys(ml), keys(tke))
+    isempty(unknown) || error("MAB_CATKE: not CATKE parameters: $(join(unknown, ", "))")
+    return CATKEVerticalDiffusivity(VerticallyImplicitTimeDiscretization();
+                                    mixing_length = CATKEMixingLength(; ml...),
+                                    turbulent_kinetic_energy_equation = CATKEEquation(; Cᵂϵ = 1.0, tke...))
+end
+
+closure_kw = isempty(CATKE_CHANGES) ? (;) : (; closure = catke_closure(CATKE_CHANGES))
+isempty(CATKE_CHANGES) || say("CATKE parameter changes: " * join(["$k = $v" for (k, v) in CATKE_CHANGES], ", "))
+ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw...)
 
 if CONSISTENT_UBC
     # Built on the whole-domain grid, on every rank, so it does not depend on which boundaries a rank owns.
