@@ -892,6 +892,14 @@ simulation.output_writers[:eta_daily] = JLD2Writer(oc, η_out;
 simulation.output_writers[:eta_pentad] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta_pentad.jld2"),
     schedule = FilteredTimeInterval(LanczosKernel(10days; cutoff = 10days); interval = 5days), overwrite_files = fresh_start)
+# MAB_CATKE_OUTPUT=true: daily means of CATKE's tracer diffusivity and its shear and convective parts, with N², S²,
+# the TKE and the surface buoyancy flux (catke_diagnostics.jl), sampled every 4 time steps
+if get(ENV, "MAB_CATKE_OUTPUT", "false") == "true"
+    include(joinpath(@__DIR__, "catke_diagnostics.jl"))
+    simulation.output_writers[:catke_daily] = JLD2Writer(oc, catke_diagnostics(oc);
+        filename = joinpath(@__DIR__, "..", TAG * "_catke_daily.jld2"),
+        schedule = AveragedTimeInterval(1days; stride = 4), overwrite_files = fresh_start)
+end
 
 simulation.output_writers[:checkpointer] = Checkpointer(model;
     schedule = CHECKPOINT_ITERATIONS > 0 ? IterationInterval(CHECKPOINT_ITERATIONS) : TimeInterval(CHECKPOINT_EVERY), dir = checkpoint_dir,
