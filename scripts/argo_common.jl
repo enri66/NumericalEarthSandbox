@@ -42,7 +42,8 @@ end
 const region_names = ("shelf (<200 m)", "slope (200-1000 m)", "deep (>1000 m)")
 
 # Every Argo profile inside the run's grid and within a day of one of its daily frames, with the model's and GLORYS's
-# columns there: depths positive downward, T and S NaN below the bottom. `region` indexes region_names.
+# columns there: depths positive downward, T and S NaN below the bottom. `region` indexes region_names; `i`, `j` and
+# `frame` are the model cell and the volume_daily frame used.
 function matched_argo_profiles(prefix, argo_dir)
     argo = read_argo(argo_dir)
     @printf("%d Argo profiles with good data, %s to %s\n", length(argo), first(argo).time, last(argo).time)
@@ -82,7 +83,7 @@ function matched_argo_profiles(prefix, argo_dir)
         g = current[:glorys]
         gT = glorys_profile(g.GT, g.lon, g.lat, g.dep, prof.lon, prof.lat, -bh[i, j])
         gS = glorys_profile(g.GS, g.lon, g.lat, g.dep, prof.lon, prof.lat, -bh[i, j])
-        push!(out, (; prof.time, prof.lat, prof.lon, region = region(i, j), month = Dates.format(prof.time, "yyyy-mm"),
+        push!(out, (; prof.time, prof.lat, prof.lon, i, j, frame = n, region = region(i, j), month = Dates.format(prof.time, "yyyy-mm"),
                     argo = (depth = prof.p, T = prof.T, S = prof.S),
                     model = (depth = depth_m, T = reverse(T), S = reverse(S)),
                     glorys = (depth = g.dep, T = gT, S = gS)))
