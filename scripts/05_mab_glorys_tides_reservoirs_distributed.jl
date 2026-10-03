@@ -820,6 +820,66 @@ function report_velocity_spike!(sim)
 end
 add_callback!(simulation, report_velocity_spike!, TimeInterval(1hours))
 
+# MAB_MOORINGS: hourly model columns at fixed positions, for comparison with moored current profilers. "pioneer" (the
+# OOI Coastal Pioneer New England Shelf moorings, 2019 positions) or "name:λ:φ,...". Each position takes the nearest
+# wet cell. The rank that owns the cell keeps u and v (averaged to the cell centre), T, S and CATKE's κc (at cell
+# faces) and rewrites <tag>_moorings_rank<r>.jld2 once a simulated day and at the end.
+const PIONEER_MOORINGS = "OSSM:-70.8869:39.9375,PMUO:-70.7702:39.9393,PMCO:-70.8792:40.0968,CNSM:-70.7783:40.1333"
+const MOORINGS = let s = get(ENV, "MAB_MOORINGS", "")
+    s = s == "pioneer" ? PIONEER_MOORINGS : s
+    [(String(a), parse(Float64, b), parse(Float64, c)) for (a, b, c) in split.(filter(!isempty, split(s, ",")), ":")]
+end
+
+if !isempty(MOORINGS)
+    JLD2m = Base.loaded_modules[only(id for id in keys(Base.loaded_modules) if id.name == "JLD2")]
+    wet_columns = [(i, j) for i in 1:Nλ, j in 1:Nφ if bh[i, j] < 0]
+    columns = map(MOORINGS) do (name, λ, φ)
+        i, j = wet_columns[argmin([hypot((λc[i] - λ) * cosd(φ), φc[j] - φ) for (i, j) in wet_columns])]
+        say(@sprintf("mooring %s (%.4f, %.4f): cell (%d, %d) at (%.4f, %.4f), model depth %.0f m", name, λ, φ, i, j, λc[i], φc[j], -bh[i, j]))
+        (; name, λ, φ, i, j, depth = -bh[i, j])
+    end
+    mine = filter(c -> I_OFF < c.i <= I_OFF + dist_grid.Nx && J_OFF < c.j <= J_OFF + dist_grid.Ny, columns)
+    mooring_record = Dict(c.name => Dict(:time => Float64[], :u => Vector{Float64}[], :v => Vector{Float64}[],
+                                         :T => Vector{Float64}[], :S => Vector{Float64}[], :κc => Vector{Float64}[]) for c in mine)
+    mooring_file = joinpath(@__DIR__, "..", TAG * "_moorings_rank$(rank).jld2")
+
+    function save_moorings()
+        isempty(mine) && return nothing
+        JLD2m.jldopen(mooring_file, "w") do file
+            file["z_center"] = collect(zc); file["z_face"] = collect(znodes(ggrid, Face()))
+            file["start_date"] = string(start_date)
+            for c in mine
+                r = mooring_record[c.name]
+                file["$(c.name)/position"] = (c.λ, c.φ); file["$(c.name)/cell"] = (c.i, c.j, λc[c.i], φc[c.j], c.depth)
+                file["$(c.name)/time"] = r[:time]
+                for q in (:u, :v, :T, :S, :κc)
+                    file["$(c.name)/$q"] = isempty(r[q]) ? zeros(0, 0) : reduce(hcat, r[q])
+                end
+            end
+        end
+        return nothing
+    end
+
+    function record_moorings!(sim)
+        oc = sim.model.ocean.model
+        u, v = oc.velocities.u, oc.velocities.v
+        T, S = oc.tracers.T, oc.tracers.S
+        κc = oc.closure_fields.κc
+        for c in mine
+            i, j = c.i - I_OFF, c.j - J_OFF
+            r = mooring_record[c.name]
+            push!(r[:time], oc.clock.time)
+            push!(r[:u], [(u[i, j, k] + u[i+1, j, k]) / 2 for k in 1:Nz])
+            push!(r[:v], [(v[i, j, k] + v[i, j+1, k]) / 2 for k in 1:Nz])
+            push!(r[:T], [T[i, j, k] for k in 1:Nz]); push!(r[:S], [S[i, j, k] for k in 1:Nz])
+            push!(r[:κc], [κc[i, j, k] for k in 1:Nz+1])
+        end
+        return nothing
+    end
+    add_callback!(simulation, record_moorings!, TimeInterval(1hours))
+    add_callback!(simulation, sim -> save_moorings(), TimeInterval(1days))
+end
+
 oc = ocean.model
 outfile = joinpath(@__DIR__, "..", TAG * ".jld2")
 save_fields = (u = Field(oc.velocities.u; indices = (:, :, grid.Nz)),
@@ -909,4 +969,5 @@ say("running on $nranks ranks: tangential=$TANGENTIAL  Uᵉˣᵗ=$UEXT_MODE  τ_
     "tides=$(join(TIDE_CONSTITUENTS, ",")) velocity=$VELOCITY_SCHEME$(VELOCITY_SCHEME == "oblique" ? "(τ_in=$(OBLIQUE_TAU_IN/days)d, τ_out=$(OBLIQUE_TAU_OUT/days)d, w=$PHASE_SPEED_WEIGHT)" : "") consistent_ubc=$CONSISTENT_UBC tracers=$TRACER_SCHEME reservoir(L_in=$RESERVOIR_L_IN, L_out=$RESERVOIR_L_OUT)  " *
     "$(sim_days) days  pickup=$PICKUP")
 run!(simulation; pickup = PICKUP, checkpoint_at_end = true)
+isempty(MOORINGS) || save_moorings()
 say("\n✅ done — $(TAG)")
