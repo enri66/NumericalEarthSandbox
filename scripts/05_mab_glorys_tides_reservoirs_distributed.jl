@@ -85,22 +85,28 @@ const STAGE = get(ENV, "MAB_STAGE", "run")
 
 # See 02_mab_glorys_obc.jl for why this defaults to the shared out-of-Dropbox cache.
 const DATA_DIR   = get(ENV, "MAB_DATA_DIR", joinpath(homedir(), "Data", "NumericalEarth"))
-const resolution = 1 / 12
+# Horizontal resolution: MAB_CELLS_PER_DEGREE (default 12, GLORYS's own) model cells per degree, a multiple of 12 so
+# that each GLORYS cell holds a whole number of model cells. The domain is the same at every resolution.
+const src_resolution  = 1 / 12                                       # GLORYS
+const CELLS_PER_DEGREE = parse(Int, get(ENV, "MAB_CELLS_PER_DEGREE", "12"))
+CELLS_PER_DEGREE % 12 == 0 || error("MAB_CELLS_PER_DEGREE must be a multiple of 12, got $CELLS_PER_DEGREE")
+const resolution = 1 / CELLS_PER_DEGREE
+const refinement = CELLS_PER_DEGREE ÷ 12                              # model cells per GLORYS cell, in each direction
 # vertical grid: Nz levels to 4000 m, exponentially stretched so that the top layer is MAB_DZ_TOP metres thick
 const Nz     = parse(Int, get(ENV, "MAB_NZ", "50"))
 const Δz_top = parse(Float64, get(ENV, "MAB_DZ_TOP", "2"))
 
-const n_pad      = 2
+const n_pad      = 2                       # GLORYS cells between the GLORYS box and the model's open boundaries
 const data_λ     = (-76.0, -64.0)          # GLORYS box (what is on disk)
 const data_φ     = ( 34.0,  42.0)
-const λ_bounds   = (data_λ[1] + n_pad*resolution, data_λ[2] - n_pad*resolution)   # model
-const φ_bounds   = (data_φ[1] + n_pad*resolution, data_φ[2] - n_pad*resolution)
+const λ_bounds   = (data_λ[1] + n_pad*src_resolution, data_λ[2] - n_pad*src_resolution)   # model
+const φ_bounds   = (data_φ[1] + n_pad*src_resolution, data_φ[2] - n_pad*src_resolution)
 const Nλ = round(Int, (λ_bounds[2] - λ_bounds[1]) / resolution)
 const Nφ = round(Int, (φ_bounds[2] - φ_bounds[1]) / resolution)
-const Nλ_src = round(Int, (data_λ[2] - data_λ[1]) / resolution)
-const Nφ_src = round(Int, (data_φ[2] - data_φ[1]) / resolution)
+const Nλ_src = round(Int, (data_λ[2] - data_λ[1]) / src_resolution)
+const Nφ_src = round(Int, (data_φ[2] - data_φ[1]) / src_resolution)
 
-const start_date = DateTime(2019, 4, 1)
+const start_date = DateTime(get(ENV, "MAB_START_DATE", "2019-04-01"))
 const sim_days   = parse(Int, get(ENV, "MAB_DAYS", "14"))
 const stop_date  = start_date + Day(sim_days)
 
@@ -248,11 +254,18 @@ const Δz_src = diff(collect(znodes(src_grid, Face())))
 const bh     = Array(interior(bottom_height))[:, :, 1]
 const floors = ((bh[1, :], bh[end, :]), (bh[:, 1], bh[:, end]))
 
+# Along a boundary, GLORYS column s covers the model cells (s - n_pad - 1) refinement + 1 … (s - n_pad) refinement;
+# its floor is the shallowest of theirs (with one model cell per GLORYS cell, cell s - n_pad)
+function source_column_floor(floor_line, s)
+    cells = clamp((s - n_pad - 1) * refinement + 1, 1, length(floor_line)):clamp((s - n_pad) * refinement, 1, length(floor_line))
+    return maximum(floor_line[cells])
+end
+
 function wet_transport(col, floor_line)
     Ns = size(col, 1)
     T, Hwet = zeros(Ns), zeros(Ns)
     for s in 1:Ns
-        b = floor_line[clamp(s - n_pad, 1, length(floor_line))]
+        b = source_column_floor(floor_line, s)
         for k in 1:size(col, 2)
             if zc_src[k] > b
                 T[s]    += Δz_src[k] * col[s, k]
@@ -295,7 +308,7 @@ function true_depth_mean(col, zc, Δz, floor_line)
     Ns = size(col, 1)
     ubar = zeros(Ns)
     for s in 1:Ns
-        b = floor_line[clamp(s - n_pad, 1, length(floor_line))]
+        b = source_column_floor(floor_line, s)
         T = H = 0.0
         for k in 1:size(col, 2)
             v = col[s, k]
@@ -347,8 +360,10 @@ end
 @inline function lerp_slab(times, slabs, i, t)
     n1, n2, w = frame(times, t)
     a = slabs[n1]; b = slabs[n2]
-    ii = clamp(i + n_pad, 1, length(a))
-    return (1 - w) * a[ii] + w * b[ii]
+    # model cell i along the boundary sits at GLORYS index n_pad + 1/2 + (i - 1/2) / refinement (n_pad + i at 1/12°)
+    σ = clamp(n_pad + 0.5 + (i - 0.5) / refinement, 1, length(a))
+    s₁ = clamp(floor(Int, σ), 1, length(a) - 1); r = σ - s₁
+    return (1 - w) * ((1 - r) * a[s₁] + r * a[s₁+1]) + w * ((1 - r) * b[s₁] + r * b[s₁+1])
 end
 ηs(k) = [s[k] for s in η_slabs]
 η_w, η_e, η_s, η_n = ηs(1), ηs(2), ηs(3), ηs(4)

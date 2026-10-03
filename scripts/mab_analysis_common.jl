@@ -9,7 +9,7 @@ const JLD2 = Base.loaded_modules[only(id for id in keys(Base.loaded_modules) if 
 
 const OUT  = joinpath(homedir(), "Data", "mab_glorys_obc")
 const GDIR = get(ENV, "MAB_DATA_DIR", joinpath(homedir(), "Data", "NumericalEarth"))
-const start_date = DateTime(2019, 4, 1)
+const start_date = DateTime(get(ENV, "MAB_START_DATE", "2019-04-01"))   # the run's start (its clock's zero)
 
 const eos = SWP.TEOS10.TEOS10EquationOfState()
 σ₀(T, S) = SWP.ρ(T, S, 0, eos) - 1000
