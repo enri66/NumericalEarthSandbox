@@ -6,7 +6,7 @@
 #       ("absolute") or the wind minus the surface current ("relative");
 #   the buoy's own net heat flux (METBK A and B, positive upward), applied at the surface (no salinity flux).
 # Variants (COLUMN_VARIANTS, comma separated): catke, catke_relative, combo (the combo run's coefficients),
-# combo_relative. The near-inertial kinetic energy (16-22 h band) is averaged over 12-72 m, the window of the
+# combo_relative; each column's hourly profiles are saved to <tag>_column_cnsm_<variant>.jld2. The near-inertial kinetic energy (16-22 h band) is averaged over 12-72 m, the window of the
 # mooring comparison, and printed beside the 3D run's own at the mooring cell (MAB_TAG, MAB_MOORINGS=pioneer).
 # Usage:
 #   MAB_TAG=/t0/workdir/enrique/runs/res_test/r12 MAB_START_DATE=2019-08-29 OOI_DIR=/t0/workdir/enrique/Data/OOI/pioneer \
@@ -112,11 +112,13 @@ function run_column(variant)
                                         tracers = (:T, :S), boundary_conditions = (u = u_bcs, v = v_bcs, T = T_bcs))
     set!(model, T = reshape(moor.T[kc, 1], 1, 1, :), S = reshape(moor.S[kc, 1], 1, 1, :))
     sim = Simulation(model; Δt = 300.0, stop_time = DAYS * 86400.0)
-    out = (t = Float64[], u = Vector{Float64}[], v = Vector{Float64}[], T = Vector{Float64}[], S = Vector{Float64}[])
+    out = (t = Float64[], u = Vector{Float64}[], v = Vector{Float64}[], T = Vector{Float64}[], S = Vector{Float64}[],
+           κu = Vector{Float64}[], e = Vector{Float64}[])
     function record(sim)
         push!(out.t, sim.model.clock.time)
         push!(out.u, Array(interior(sim.model.velocities.u))[1, 1, :]); push!(out.v, Array(interior(sim.model.velocities.v))[1, 1, :])
         push!(out.T, Array(interior(sim.model.tracers.T))[1, 1, :]); push!(out.S, Array(interior(sim.model.tracers.S))[1, 1, :])
+        push!(out.κu, Array(interior(sim.model.closure_fields.κu))[1, 1, :]); push!(out.e, Array(interior(sim.model.tracers.e))[1, 1, :])
     end
     add_callback!(sim, record, TimeInterval(3600.0))
     run!(sim)
@@ -154,6 +156,10 @@ for variant in VARIANTS
     @info "column: $variant"
     out = run_column(String(variant))
     times = [T0 + Second(round(Int, s)) for s in out.t]
+    # hourly profiles, bottom to top, for comparison with the 3D run's mooring column (z_face: the column's faces)
+    JLD2.jldsave(PREFIX * "_column_cnsm_$(variant).jld2"; start_date = string(T0), time = out.t, z_face = zfaces,
+                 u = reduce(hcat, out.u), v = reduce(hcat, out.v), T = reduce(hcat, out.T), S = reduce(hcat, out.S),
+                 κu = reduce(hcat, out.κu), e = reduce(hcat, out.e))
     ke = near_inertial_KE(depth_c, reverse(reduce(hcat, out.u); dims = 1), reverse(reduce(hcat, out.v); dims = 1))
     results[variant] = (; times, ke, mld = [mld(out.T[n], out.S[n]) for n in eachindex(out.t)])
 end

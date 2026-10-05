@@ -845,8 +845,8 @@ add_callback!(simulation, report_velocity_spike!, TimeInterval(1hours))
 
 # MAB_MOORINGS: hourly model columns at fixed positions, for comparison with moored current profilers. "pioneer" (the
 # OOI Coastal Pioneer New England Shelf moorings, 2019 positions) or "name:λ:φ,...". Each position takes the nearest
-# wet cell. The rank that owns the cell keeps u and v (averaged to the cell centre), T, S and CATKE's κc (at cell
-# faces), and at the surface the atmospheric wind the fluxes are computed from (ua, va), the turbulent momentum
+# wet cell. The rank that owns the cell keeps u and v (averaged to the cell centre), T, S, CATKE's κc and κu (at cell
+# faces) and TKE e, and at the surface the atmospheric wind the fluxes are computed from (ua, va), the turbulent momentum
 # fluxes (τx, τy: NumericalEarth's x_momentum, y_momentum, N/m², positive upward) and the friction velocity u★, and
 # rewrites <tag>_moorings_rank<r>.jld2 once a simulated day and at the end.
 const PIONEER_MOORINGS = "OSSM:-70.8869:39.9375,PMUO:-70.7702:39.9393,PMCO:-70.8792:40.0968,CNSM:-70.7783:40.1333"
@@ -866,6 +866,7 @@ if !isempty(MOORINGS)
     mine = filter(c -> I_OFF < c.i <= I_OFF + dist_grid.Nx && J_OFF < c.j <= J_OFF + dist_grid.Ny, columns)
     mooring_record = Dict(c.name => Dict(:time => Float64[], :u => Vector{Float64}[], :v => Vector{Float64}[],
                                          :T => Vector{Float64}[], :S => Vector{Float64}[], :κc => Vector{Float64}[],
+                                         :κu => Vector{Float64}[], :e => Vector{Float64}[],
                                          :ua => Float64[], :va => Float64[], :τx => Float64[], :τy => Float64[], :u★ => Float64[]) for c in mine)
     mooring_file = joinpath(@__DIR__, "..", TAG * "_moorings_rank$(rank).jld2")
 
@@ -878,7 +879,7 @@ if !isempty(MOORINGS)
                 r = mooring_record[c.name]
                 file["$(c.name)/position"] = (c.λ, c.φ); file["$(c.name)/cell"] = (c.i, c.j, λc[c.i], φc[c.j], c.depth)
                 file["$(c.name)/time"] = r[:time]
-                for q in (:u, :v, :T, :S, :κc)
+                for q in (:u, :v, :T, :S, :κc, :κu, :e)
                     file["$(c.name)/$q"] = isempty(r[q]) ? zeros(0, 0) : reduce(hcat, r[q])
                 end
                 for q in (:ua, :va, :τx, :τy, :u★)
@@ -893,7 +894,7 @@ if !isempty(MOORINGS)
         oc = sim.model.ocean.model
         u, v = oc.velocities.u, oc.velocities.v
         T, S = oc.tracers.T, oc.tracers.S
-        κc = oc.closure_fields.κc
+        κc = oc.closure_fields.κc; κu = oc.closure_fields.κu; e = oc.tracers.e
         atm = sim.model.interfaces.exchanger.atmosphere.state
         ao  = sim.model.interfaces.atmosphere_ocean_interface.fluxes
         for c in mine
@@ -903,7 +904,8 @@ if !isempty(MOORINGS)
             push!(r[:u], [(u[i, j, k] + u[i+1, j, k]) / 2 for k in 1:Nz])
             push!(r[:v], [(v[i, j, k] + v[i, j+1, k]) / 2 for k in 1:Nz])
             push!(r[:T], [T[i, j, k] for k in 1:Nz]); push!(r[:S], [S[i, j, k] for k in 1:Nz])
-            push!(r[:κc], [κc[i, j, k] for k in 1:Nz+1])
+            push!(r[:κc], [κc[i, j, k] for k in 1:Nz+1]); push!(r[:κu], [κu[i, j, k] for k in 1:Nz+1])
+            push!(r[:e], [e[i, j, k] for k in 1:Nz])
             push!(r[:ua], atm.u[i, j, 1]); push!(r[:va], atm.v[i, j, 1])
             push!(r[:τx], ao.x_momentum[i, j, 1]); push!(r[:τy], ao.y_momentum[i, j, 1]); push!(r[:u★], ao.friction_velocity[i, j, 1])
         end
