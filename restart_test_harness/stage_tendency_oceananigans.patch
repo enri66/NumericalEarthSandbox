@@ -1,0 +1,43 @@
+diff --git a/src/Models/HydrostaticFreeSurfaceModels/hydrostatic_free_surface_rk_step.jl b/src/Models/HydrostaticFreeSurfaceModels/hydrostatic_free_surface_rk_step.jl
+index 743962126..d14fd5476 100644
+--- a/src/Models/HydrostaticFreeSurfaceModels/hydrostatic_free_surface_rk_step.jl
++++ b/src/Models/HydrostaticFreeSurfaceModels/hydrostatic_free_surface_rk_step.jl
+@@ -11,8 +11,10 @@ Perform a single split Runge-Kutta substep for `HydrostaticFreeSurfaceModel`.
+ Dispatches to the appropriate method based on the free surface type (explicit or implicit).
+ The substep advances the state from the cached initial fields `Ψ⁻` using: `U = Ψ⁻ + Δτ * Gⁿ`.
+ """
+-rk_substep!(model::HydrostaticFreeSurfaceModel, Δτ, callbacks) =
+-    rk_substep!(model, model.free_surface, model.grid, Δτ, callbacks)
++function rk_substep!(model::HydrostaticFreeSurfaceModel, Δτ, callbacks)
++    @apply_regionally compute_momentum_tendencies!(model, callbacks)
++    return rk_substep!(model, model.free_surface, model.grid, Δτ, callbacks)
++end
+ 
+ """
+ $(TYPEDSIGNATURES)
+diff --git a/src/Models/HydrostaticFreeSurfaceModels/single_column_model_mode.jl b/src/Models/HydrostaticFreeSurfaceModels/single_column_model_mode.jl
+index 5c47128b1..cdb8ef2b5 100644
+--- a/src/Models/HydrostaticFreeSurfaceModels/single_column_model_mode.jl
++++ b/src/Models/HydrostaticFreeSurfaceModels/single_column_model_mode.jl
+@@ -86,7 +86,7 @@ function update_state!(model::HydrostaticFreeSurfaceModel, grid::SingleColumnGri
+     update_biogeochemical_state!(model.biogeochemistry, model)
+ 
+     update_advection!(model.advection, model)
+-    compute_momentum_tendencies!(model, callbacks)
++    model.timestepper isa SplitRungeKuttaTimeStepper || compute_momentum_tendencies!(model, callbacks)
+ 
+     return nothing
+ end
+diff --git a/src/Models/HydrostaticFreeSurfaceModels/update_hydrostatic_free_surface_model_state.jl b/src/Models/HydrostaticFreeSurfaceModels/update_hydrostatic_free_surface_model_state.jl
+index 20b232f42..9b0d1e9d2 100644
+--- a/src/Models/HydrostaticFreeSurfaceModels/update_hydrostatic_free_surface_model_state.jl
++++ b/src/Models/HydrostaticFreeSurfaceModels/update_hydrostatic_free_surface_model_state.jl
+@@ -80,7 +80,7 @@ function update_state!(model::HydrostaticFreeSurfaceModel, grid, callbacks)
+ 
+     @apply_regionally begin
+         update_advection!(model.advection, model)
+-        compute_momentum_tendencies!(model, callbacks)
++        model.timestepper isa SplitRungeKuttaTimeStepper || compute_momentum_tendencies!(model, callbacks)
+     end
+ 
+     return nothing
