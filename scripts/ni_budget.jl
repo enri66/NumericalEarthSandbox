@@ -16,7 +16,8 @@ using CairoMakie
 include(joinpath(@__DIR__, "ooi_common.jl"))
 
 const TAGS   = filter(!isempty, split(get(ENV, "MAB_TAGS", ""), ","))
-const AXIS   = collect(DateTime(2019, 8, 30):Hour(1):DateTime(2019, 10, 27))
+# analysis window (NI_START, NI_END), within every source's record
+const AXIS   = collect(DateTime(get(ENV, "NI_START", "2019-08-30")):Hour(1):DateTime(get(ENV, "NI_END", "2019-10-27")))
 const STORMS = (("Dorian", DateTime(2019, 9, 6), DateTime(2019, 9, 13)),
                 ("mid-Sep", DateTime(2019, 9, 14), DateTime(2019, 9, 21)),
                 ("17 Oct", DateTime(2019, 10, 17), DateTime(2019, 10, 24)))
@@ -101,12 +102,12 @@ for (row, name) in enumerate(fignames)
     r = results[name]
     for (col, label) in enumerate(r.labels)
         ax = Axis(fig[row, col], title = "$name: $label", yreversed = true, ylabel = col == 1 ? "depth (m)" : "",
-                  xlabel = row == length(fignames) ? "days since 2019-08-30" : "")
+                  xlabel = row == length(fignames) ? "days since $(Dates.format(AXIS[1], "yyyy-mm-dd"))" : "")
         global hm = heatmap!(ax, td, r.grid, log10.(max.(r.KE[label], 1e-7))'; colormap = :thermal, colorrange = (-5.5, -1.5))
         for (a, b) in r.layers[2:end]; hlines!(ax, a; color = :white, linestyle = :dot, linewidth = 1); end
     end
 end
 Colorbar(fig[1:length(fignames), ncols + 1], hm; label = "log₁₀ KE")
-out = joinpath(OUTDIR, "ni_budget.png")
+out = joinpath(OUTDIR, get(ENV, "NI_FIGURE", "ni_budget.png"))
 save(out, fig; px_per_unit = 1.2)
 println("\nsaved ", out)
