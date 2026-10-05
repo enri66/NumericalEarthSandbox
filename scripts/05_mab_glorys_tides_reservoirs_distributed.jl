@@ -738,7 +738,11 @@ MOMENTUM_ADVECTION in ("default", "weno9") || error("MAB_MOMENTUM_ADVECTION must
 advection_kw = MOMENTUM_ADVECTION == "weno9" ?
     (; momentum_advection = WENOVectorInvariant(order = 9, time_discretization = AdaptiveVerticallyImplicitDiscretization(cfl = 0.5))) : (;)
 MOMENTUM_ADVECTION == "default" || say("momentum advection: WENOVectorInvariant, order 9 throughout")
-ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw..., advection_kw...)
+# Quadratic bottom drag coefficient (NumericalEarth's default 0.003, semi-implicit)
+const BOTTOM_DRAG = parse(Float64, get(ENV, "MAB_BOTTOM_DRAG", "0.003"))
+BOTTOM_DRAG == 0.003 || say("bottom drag coefficient Cᴰ = $BOTTOM_DRAG")
+ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw..., advection_kw...,
+                         bottom_drag_coefficient = BOTTOM_DRAG)
 
 if CONSISTENT_UBC
     # Built on the whole-domain grid, on every rank, so it does not depend on which boundaries a rank owns.
@@ -991,6 +995,13 @@ simulation.output_writers[:volume_daily] = JLD2Writer(oc, volume_fields;
 simulation.output_writers[:eta] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta.jld2"),
     schedule = TimeInterval(1hours), overwrite_files = fresh_start)
+# MAB_BAROTROPIC_OUTPUT=true: hourly barotropic transports U, V (m²/s) of the split-explicit free surface, for
+# tidal-current maps
+if get(ENV, "MAB_BAROTROPIC_OUTPUT", "false") == "true"
+    simulation.output_writers[:barotropic] = JLD2Writer(oc, oc.free_surface.barotropic_velocities;
+        filename = joinpath(@__DIR__, "..", TAG * "_barotropic.jld2"),
+        schedule = TimeInterval(1hours), overwrite_files = fresh_start)
+end
 simulation.output_writers[:eta_daily] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta_daily.jld2"),
     schedule = FilteredTimeInterval(LanczosKernel(6days; cutoff = 40hours); interval = 1days), overwrite_files = fresh_start)
