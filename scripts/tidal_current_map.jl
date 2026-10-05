@@ -35,9 +35,11 @@ function fit_many(t, X)
 end
 semimajor(Cu, Cv) = (abs(Cu + im * Cv) + abs(conj(Cu) + im * conj(Cv))) / 2
 
-# Grid, wet cells and depths from the first run's daily output
+# Grid, wet cells and depths from the first run's barotropic output (its rank files carry the grid)
 ref = run_prefix(String(first(TAGS)))
-grid = open_series(ref * "_volume_daily.jld2", "T"; backend = OnDisk()).grid; ug = grid.underlying_grid
+grid = isfile(ref * "_barotropic.jld2") ? JLD2.jldopen(f -> f["serialized/grid"], ref * "_barotropic.jld2") :
+                                          global_grid(ref * "_barotropic.jld2")
+ug = grid.underlying_grid
 Nx, Ny = size(ug, 1), size(ug, 2)
 λ = collect(λnodes(ug, Center())); φ = collect(φnodes(ug, Center()))
 B = grid.immersed_boundary.bottom_height; bh = [B[i, j, 1] for i in 1:Nx, j in 1:Ny]
