@@ -92,9 +92,11 @@ const CELLS_PER_DEGREE = parse(Int, get(ENV, "MAB_CELLS_PER_DEGREE", "12"))
 CELLS_PER_DEGREE % 12 == 0 || error("MAB_CELLS_PER_DEGREE must be a multiple of 12, got $CELLS_PER_DEGREE")
 const resolution = 1 / CELLS_PER_DEGREE
 const refinement = CELLS_PER_DEGREE ÷ 12                              # model cells per GLORYS cell, in each direction
-# vertical grid: Nz levels to 4000 m, exponentially stretched so that the top layer is MAB_DZ_TOP metres thick
+# vertical grid: Nz levels to MAB_ZBOTTOM metres (default 4000; the basin reaches about 5400 m), exponentially stretched
+# so that the top layer is MAB_DZ_TOP metres thick
 const Nz     = parse(Int, get(ENV, "MAB_NZ", "50"))
 const Δz_top = parse(Float64, get(ENV, "MAB_DZ_TOP", "2"))
+const Z_BOTTOM = parse(Float64, get(ENV, "MAB_ZBOTTOM", "4000"))
 
 const n_pad      = 2                       # GLORYS cells between the GLORYS box and the model's open boundaries
 const data_λ     = (-76.0, -64.0)          # GLORYS box (what is on disk)
@@ -133,6 +135,9 @@ const TIDE_RAMP  = parse(Float64, get(ENV, "MAB_TIDE_RAMP", "1")) * days
 # MAB_TIDES=false switches the tides off: no TPXO tidal transport and elevation at the open boundaries and no
 # equilibrium tidal body force (the GLORYS subtidal exterior is unchanged)
 const TIDES = get(ENV, "MAB_TIDES", "true") == "true"
+# MAB_TIDE_TRANSPORT_SCALING=true scales the TPXO tidal transports at the open boundaries by H_model / H_TPXO, so the
+# tide enters with TPXO's depth-mean velocity, as the GLORYS subtidal transport does (default: TPXO's transport as is)
+const TIDE_TRANSPORT_SCALING = get(ENV, "MAB_TIDE_TRANSPORT_SCALING", "false") == "true"
 const TPXO_DIR   = get(ENV, "TPXO_DIR", joinpath(homedir(), "Data", "TPXO10_atlas_v2_nc"))
 
 # tracer reservoirs (MOM6-scale defaults: relax over 20 km on inflow, memoryless on outflow)
@@ -189,7 +194,7 @@ function exponential_scale(N, H, Δtop)
     return (lo + hi) / 2
 end
 
-z = ExponentialDiscretization(Nz, -4000, 0; scale = exponential_scale(Nz, 4000, Δz_top))
+z = ExponentialDiscretization(Nz, -Z_BOTTOM, 0; scale = exponential_scale(Nz, Z_BOTTOM, Δz_top))
 
 # The whole-domain grid and bathymetry: the same on every rank, computed serially exactly as in 04.
 whole_grid = LatitudeLongitudeGrid(CPU(); size = (Nλ, Nφ, Nz),
@@ -397,6 +402,29 @@ south_V_const = tidal_constants(:northward_transport, [(λ, first(φᶠ)) for λ
 south_η_const = tidal_constants(:sea_surface_height,  [(λ, first(φᶜ)) for λ in λᶜ])
 north_V_const = tidal_constants(:northward_transport, [(λ, last(φᶠ))  for λ in λᶜ])
 north_η_const = tidal_constants(:sea_surface_height,  [(λ, last(φᶜ))  for λ in λᶜ])
+if TIDES && TIDE_TRANSPORT_SCALING
+    # TPXO's own depth at the boundary nodes, from its grid file (tpxo.jl, read in a module of its own)
+    @eval module TPXOFiles
+        include(joinpath($(@__DIR__), "tpxo.jl"))
+    end
+    tpxo_window = TPXOFiles.load_tpxo((:m2,); λ_bounds = (λ_bounds[1] - 1, λ_bounds[2] + 1),
+                                      φ_bounds = (φ_bounds[1] - 1, φ_bounds[2] + 1), dir = TPXO_DIR, verbose = false)
+    function scale_to_model_depth!(C, nodes, model_depths)
+        ratios = Float64[]
+        for (k, (λ, φ)) in enumerate(nodes)
+            Ht = first(TPXOFiles.tpxo_depth(tpxo_window, λ, φ)); Hm = model_depths[k]
+            (isfinite(Ht) && Ht > 0 && Hm > 0) || continue
+            C[k, :] .*= Hm / Ht; push!(ratios, Hm / Ht)
+        end
+        return ratios
+    end
+    r = vcat(scale_to_model_depth!(west_U_const,  [(first(λᶠ), φ) for φ in φᶜ], [min(-bh[1, j], Z_BOTTOM) for j in 1:Nφ]),
+             scale_to_model_depth!(east_U_const,  [(last(λᶠ), φ) for φ in φᶜ],  [min(-bh[end, j], Z_BOTTOM) for j in 1:Nφ]),
+             scale_to_model_depth!(south_V_const, [(λ, first(φᶠ)) for λ in λᶜ], [min(-bh[i, 1], Z_BOTTOM) for i in 1:Nλ]),
+             scale_to_model_depth!(north_V_const, [(λ, last(φᶠ)) for λ in λᶜ],  [min(-bh[i, end], Z_BOTTOM) for i in 1:Nλ]))
+    say(@sprintf("tidal transports scaled to the model depth at %d boundary nodes: H_model / H_TPXO median %.2f, range %.2f-%.2f",
+                 length(r), median(r), minimum(r), maximum(r)))
+end
 if !TIDES
     for c in (west_U_const, west_η_const, east_U_const, east_η_const, south_V_const, south_η_const, north_V_const, north_η_const)
         c .= 0
