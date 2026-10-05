@@ -92,11 +92,11 @@ const CELLS_PER_DEGREE = parse(Int, get(ENV, "MAB_CELLS_PER_DEGREE", "12"))
 CELLS_PER_DEGREE % 12 == 0 || error("MAB_CELLS_PER_DEGREE must be a multiple of 12, got $CELLS_PER_DEGREE")
 const resolution = 1 / CELLS_PER_DEGREE
 const refinement = CELLS_PER_DEGREE ÷ 12                              # model cells per GLORYS cell, in each direction
-# vertical grid: Nz levels to MAB_ZBOTTOM metres (default 4000; the basin reaches about 5400 m), exponentially stretched
-# so that the top layer is MAB_DZ_TOP metres thick
+# vertical grid: Nz levels to MAB_ZBOTTOM metres (default 5500, below the deepest water, about 5400 m, so the basin keeps
+# its true depth; 4000 before 2026-10-05), exponentially stretched so that the top layer is MAB_DZ_TOP metres thick
 const Nz     = parse(Int, get(ENV, "MAB_NZ", "50"))
 const Δz_top = parse(Float64, get(ENV, "MAB_DZ_TOP", "2"))
-const Z_BOTTOM = parse(Float64, get(ENV, "MAB_ZBOTTOM", "4000"))
+const Z_BOTTOM = parse(Float64, get(ENV, "MAB_ZBOTTOM", "5500"))
 
 const n_pad      = 2                       # GLORYS cells between the GLORYS box and the model's open boundaries
 const data_λ     = (-76.0, -64.0)          # GLORYS box (what is on disk)
@@ -135,9 +135,10 @@ const TIDE_RAMP  = parse(Float64, get(ENV, "MAB_TIDE_RAMP", "1")) * days
 # MAB_TIDES=false switches the tides off: no TPXO tidal transport and elevation at the open boundaries and no
 # equilibrium tidal body force (the GLORYS subtidal exterior is unchanged)
 const TIDES = get(ENV, "MAB_TIDES", "true") == "true"
-# MAB_TIDE_TRANSPORT_SCALING=true scales the TPXO tidal transports at the open boundaries by H_model / H_TPXO, so the
-# tide enters with TPXO's depth-mean velocity, as the GLORYS subtidal transport does (default: TPXO's transport as is)
-const TIDE_TRANSPORT_SCALING = get(ENV, "MAB_TIDE_TRANSPORT_SCALING", "false") == "true"
+# MAB_TIDE_TRANSPORT_SCALING (default true since 2026-10-05) scales the TPXO tidal transports at the open boundaries by
+# H_model / H_TPXO, so the tide enters with TPXO's depth-mean velocity, as the GLORYS subtidal transport does; false
+# passes TPXO's transport as is
+const TIDE_TRANSPORT_SCALING = get(ENV, "MAB_TIDE_TRANSPORT_SCALING", "true") == "true"
 const TPXO_DIR   = get(ENV, "TPXO_DIR", joinpath(homedir(), "Data", "TPXO10_atlas_v2_nc"))
 
 # tracer reservoirs (MOM6-scale defaults: relax over 20 km on inflow, memoryless on outflow)

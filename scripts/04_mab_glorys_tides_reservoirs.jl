@@ -44,9 +44,11 @@ include(joinpath(@__DIR__, "glorys_bathymetry.jl"))
 # See 02_mab_glorys_obc.jl for why this defaults to the shared out-of-Dropbox cache.
 const DATA_DIR   = get(ENV, "MAB_DATA_DIR", joinpath(homedir(), "Data", "NumericalEarth"))
 const resolution = 1 / 12
-# vertical grid: Nz levels to 4000 m, exponentially stretched so that the top layer is MAB_DZ_TOP metres thick
+# vertical grid: Nz levels to MAB_ZBOTTOM metres (default 5500, below the deepest water, about 5400 m, so the basin keeps
+# its true depth; 4000 before 2026-10-05), exponentially stretched so that the top layer is MAB_DZ_TOP metres thick
 const Nz     = parse(Int, get(ENV, "MAB_NZ", "50"))
 const Δz_top = parse(Float64, get(ENV, "MAB_DZ_TOP", "2"))
+const Z_BOTTOM = parse(Float64, get(ENV, "MAB_ZBOTTOM", "5500"))
 
 const n_pad      = 2
 const data_λ     = (-76.0, -64.0)          # GLORYS box (what is on disk)
@@ -83,6 +85,10 @@ const SPIKE_THRESHOLD = parse(Float64, get(ENV, "MAB_SPIKE_THRESHOLD", "2.0"))
 const TIDE_CONSTITUENTS = Symbol.(split(get(ENV, "MAB_TIDE_CONSTITUENTS", "M2,S2,N2,K2,K1,O1,P1,Q1,Mf,Mm"), ","))
 const TIDE_RAMP  = parse(Float64, get(ENV, "MAB_TIDE_RAMP", "1")) * days
 const TPXO_DIR   = get(ENV, "TPXO_DIR", joinpath(homedir(), "Data", "TPXO10_atlas_v2_nc"))
+# MAB_TIDE_TRANSPORT_SCALING (default true since 2026-10-05) scales the TPXO tidal transports at the open boundaries by
+# H_model / H_TPXO, so the tide enters with TPXO's depth-mean velocity, as the GLORYS subtidal transport does; false
+# passes TPXO's transport as is
+const TIDE_TRANSPORT_SCALING = get(ENV, "MAB_TIDE_TRANSPORT_SCALING", "true") == "true"
 
 # tracer reservoirs (MOM6-scale defaults: relax over 20 km on inflow, memoryless on outflow)
 const RESERVOIR_L_IN  = parse(Float64, get(ENV, "MAB_RESERVOIR_L_IN", "20000"))
@@ -149,7 +155,7 @@ function exponential_scale(N, H, Δtop)
     return (lo + hi) / 2
 end
 
-z = ExponentialDiscretization(Nz, -4000, 0; scale = exponential_scale(Nz, 4000, Δz_top))
+z = ExponentialDiscretization(Nz, -Z_BOTTOM, 0; scale = exponential_scale(Nz, Z_BOTTOM, Δz_top))
 grid = LatitudeLongitudeGrid(CPU(); size = (Nλ, Nφ, Nz),
                              longitude = λ_bounds, latitude = φ_bounds, z, halo = (7, 7, 7))
 bottom_height = regrid_bathymetry(grid; dataset = ETOPO2022(), height_above_water = 1,
@@ -317,6 +323,29 @@ south_V_const = tidal_constants(:northward_transport, [(λ, first(φᶠ)) for λ
 south_η_const = tidal_constants(:sea_surface_height,  [(λ, first(φᶜ)) for λ in λᶜ])
 north_V_const = tidal_constants(:northward_transport, [(λ, last(φᶠ))  for λ in λᶜ])
 north_η_const = tidal_constants(:sea_surface_height,  [(λ, last(φᶜ))  for λ in λᶜ])
+if TIDE_TRANSPORT_SCALING
+    # TPXO's own depth at the boundary nodes, from its grid file (tpxo.jl, read in a module of its own)
+    @eval module TPXOFiles
+        include(joinpath($(@__DIR__), "tpxo.jl"))
+    end
+    tpxo_window = TPXOFiles.load_tpxo((:m2,); λ_bounds = (λ_bounds[1] - 1, λ_bounds[2] + 1),
+                                      φ_bounds = (φ_bounds[1] - 1, φ_bounds[2] + 1), dir = TPXO_DIR, verbose = false)
+    function scale_to_model_depth!(C, nodes, model_depths)
+        ratios = Float64[]
+        for (k, (λ, φ)) in enumerate(nodes)
+            Ht = first(TPXOFiles.tpxo_depth(tpxo_window, λ, φ)); Hm = model_depths[k]
+            (isfinite(Ht) && Ht > 0 && Hm > 0) || continue
+            C[k, :] .*= Hm / Ht; push!(ratios, Hm / Ht)
+        end
+        return ratios
+    end
+    r = vcat(scale_to_model_depth!(west_U_const,  [(first(λᶠ), φ) for φ in φᶜ], [min(-bh[1, j], Z_BOTTOM) for j in 1:Nφ]),
+             scale_to_model_depth!(east_U_const,  [(last(λᶠ), φ) for φ in φᶜ],  [min(-bh[end, j], Z_BOTTOM) for j in 1:Nφ]),
+             scale_to_model_depth!(south_V_const, [(λ, first(φᶠ)) for λ in λᶜ], [min(-bh[i, 1], Z_BOTTOM) for i in 1:Nλ]),
+             scale_to_model_depth!(north_V_const, [(λ, last(φᶠ)) for λ in λᶜ],  [min(-bh[i, end], Z_BOTTOM) for i in 1:Nλ]))
+    @info @sprintf("tidal transports scaled to the model depth at %d boundary nodes: H_model / H_TPXO median %.2f, range %.2f-%.2f",
+                   length(r), median(r), minimum(r), maximum(r))
+end
 
 @inline function tidal_UV_eta(Uconst, ηconst, harmonics, t, i)
     U = η = 0.0
