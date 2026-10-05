@@ -720,7 +720,15 @@ end
 
 closure_kw = isempty(CATKE_CHANGES) ? (;) : (; closure = catke_closure(CATKE_CHANGES))
 isempty(CATKE_CHANGES) || say("CATKE parameter changes: " * join(["$k = $v" for (k, v) in CATKE_CHANGES], ", "))
-ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw...)
+# Momentum advection: "default" (NumericalEarth's WENOVectorInvariant: WENO order 9 for the vorticity flux, order 5
+# for vertical advection, divergence and the kinetic-energy gradient) or "weno9" (order 9 for all four, less
+# dissipative; needs halos of at least 5, the grid has 7)
+const MOMENTUM_ADVECTION = get(ENV, "MAB_MOMENTUM_ADVECTION", "default")
+MOMENTUM_ADVECTION in ("default", "weno9") || error("MAB_MOMENTUM_ADVECTION must be default or weno9, got $MOMENTUM_ADVECTION")
+advection_kw = MOMENTUM_ADVECTION == "weno9" ?
+    (; momentum_advection = WENOVectorInvariant(order = 9, time_discretization = AdaptiveVerticallyImplicitDiscretization(cfl = 0.5))) : (;)
+MOMENTUM_ADVECTION == "default" || say("momentum advection: WENOVectorInvariant, order 9 throughout")
+ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw..., advection_kw...)
 
 if CONSISTENT_UBC
     # Built on the whole-domain grid, on every rank, so it does not depend on which boundaries a rank owns.
