@@ -130,6 +130,9 @@ const SPIKE_THRESHOLD = parse(Float64, get(ENV, "MAB_SPIKE_THRESHOLD", "2.0"))
 # tides
 const TIDE_CONSTITUENTS = Symbol.(split(get(ENV, "MAB_TIDE_CONSTITUENTS", "M2,S2,N2,K2,K1,O1,P1,Q1,Mf,Mm"), ","))
 const TIDE_RAMP  = parse(Float64, get(ENV, "MAB_TIDE_RAMP", "1")) * days
+# MAB_TIDES=false switches the tides off: no TPXO tidal transport and elevation at the open boundaries and no
+# equilibrium tidal body force (the GLORYS subtidal exterior is unchanged)
+const TIDES = get(ENV, "MAB_TIDES", "true") == "true"
 const TPXO_DIR   = get(ENV, "TPXO_DIR", joinpath(homedir(), "Data", "TPXO10_atlas_v2_nc"))
 
 # tracer reservoirs (MOM6-scale defaults: relax over 20 km on inflow, memoryless on outflow)
@@ -394,6 +397,12 @@ south_V_const = tidal_constants(:northward_transport, [(λ, first(φᶠ)) for λ
 south_η_const = tidal_constants(:sea_surface_height,  [(λ, first(φᶜ)) for λ in λᶜ])
 north_V_const = tidal_constants(:northward_transport, [(λ, last(φᶠ))  for λ in λᶜ])
 north_η_const = tidal_constants(:sea_surface_height,  [(λ, last(φᶜ))  for λ in λᶜ])
+if !TIDES
+    for c in (west_U_const, west_η_const, east_U_const, east_η_const, south_V_const, south_η_const, north_V_const, north_η_const)
+        c .= 0
+    end
+    say("tides switched off (MAB_TIDES=false)")
+end
 
 @inline function tidal_UV_eta(Uconst, ηconst, harmonics, t, i)
     U = η = 0.0
@@ -650,7 +659,8 @@ end
 sponge_forcing = NamedTuple(name => sponge_forcing_for(name) for name in SPONGE_VARS)
 
 tides   = tidal_forcing(harmonics)
-forcing = merge(sponge_forcing,
+forcing = !TIDES ? sponge_forcing :
+          merge(sponge_forcing,
                 (u = :u in SPONGE_VARS ? (tides.u, sponge_forcing.u) : tides.u,
                  v = :v in SPONGE_VARS ? (tides.v, sponge_forcing.v) : tides.v))
 isempty(SPONGE_VARS) || say(@sprintf("GLORYS sponge on %s: %d cells, τ = %.2f days at the boundary, %d wet cells with μ > 0.01",
