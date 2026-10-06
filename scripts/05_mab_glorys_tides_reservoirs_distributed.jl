@@ -97,6 +97,10 @@ const refinement = CELLS_PER_DEGREE ÷ 12                              # model c
 const Nz     = parse(Int, get(ENV, "MAB_NZ", "50"))
 const Δz_top = parse(Float64, get(ENV, "MAB_DZ_TOP", "2"))
 const Z_BOTTOM = parse(Float64, get(ENV, "MAB_ZBOTTOM", "5500"))
+# MAB_LAND_FRACTION (default 0 = off): a cell is land when more than this fraction of ETOPO's 1/60° points in it are above
+# sea level (0.5 is typical), instead of regrid_bathymetry's smoothed-mean-height test, which keeps narrow land such as
+# Long Island wet (see land_fraction_mask.jl)
+const LAND_FRACTION = parse(Float64, get(ENV, "MAB_LAND_FRACTION", "0"))
 
 const n_pad      = 2                       # GLORYS cells between the GLORYS box and the model's open boundaries
 const data_λ     = (-76.0, -64.0)          # GLORYS box (what is on disk)
@@ -204,6 +208,10 @@ make_bathymetry() = regrid_bathymetry(whole_grid; dataset = ETOPO2022(), height_
                                       minimum_depth = 10, major_basins = 1, interpolation_passes = 10)
 rank0_first(make_bathymetry)              # the regridded field is cached on disk
 bottom_height = make_bathymetry()
+if LAND_FRACTION > 0
+    include(joinpath(@__DIR__, "land_fraction_mask.jl"))
+    apply_land_fraction!(bottom_height, whole_grid, LAND_FRACTION; minimum_depth = 10, say)
+end
 
 if MATCH_BATHY
     match_boundary_bathymetry!(bottom_height, whole_grid, DATA_DIR;
