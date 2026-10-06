@@ -81,14 +81,16 @@ for name in ("OSSM", "PMUO", "PMCO", "CNSM")
         @printf("   %-6s %s   share below %.0f%%   (whole column %.2f of ADCP)\n", label, join([@sprintf("%5.2f", r) for r in ratios], " "),
                 100 * (1 - mean(E[label][1]) / total(label)), total(label) / total("ADCP"))
     end
-    # Peak timing after the 17 October storm
-    w = window(DateTime(2019, 10, 16), DateTime(2019, 10, 25))
-    print("   17 Oct: hours from the top layer's peak to each layer's peak:")
-    for label in first.(sources)
-        t = [AXIS[w[argmax(E[label][i][w])]] for i in eachindex(layers)]
-        @printf("  %s %s", label, join([string(round(Int, Dates.value(t[i] - t[1]) / 3_600_000)) for i in eachindex(layers)], "/"))
+    # Peak timing after a storm (NI_PEAK_START, NI_PEAK_END; default the 17 October storm), if the window has data
+    w = window(DateTime(get(ENV, "NI_PEAK_START", "2019-10-16")), DateTime(get(ENV, "NI_PEAK_END", "2019-10-25")))
+    if !isempty(w)
+        print("   $(get(ENV, "NI_PEAK_LABEL", "17 Oct")): hours from the top layer's peak to each layer's peak:")
+        for label in first.(sources)
+            t = [AXIS[w[argmax(E[label][i][w])]] for i in eachindex(layers)]
+            @printf("  %s %s", label, join([string(round(Int, Dates.value(t[i] - t[1]) / 3_600_000)) for i in eachindex(layers)], "/"))
+        end
+        println()
     end
-    println()
 end
 
 # ---------------- figure ----------------
