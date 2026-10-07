@@ -870,12 +870,16 @@ function progress(sim)
     ηwet = filter(isfinite, interior(η))
     umax, vmax = allmax(maximum(abs, interior(u))), allmax(maximum(abs, interior(v)))
     ηmin, ηmax = allmin(minimum(ηwet)), allmax(maximum(ηwet))
-    say(@sprintf("%s  |u|=%.2f |v|=%.2f  η∈[%+.2f,%+.2f]  (%.0f s)",
-                 Dates.format(date, "yyyy-mm-dd HH:MM"), umax, vmax, ηmin, ηmax, time() - wall[]))
+    S = sim.model.ocean.model.tracers.S
+    Smin, Smax = allmin(minimum(filter(isfinite, interior(S)))), allmax(maximum(filter(isfinite, interior(S))))
+    say(@sprintf("%s  |u|=%.2f |v|=%.2f  η∈[%+.2f,%+.2f]  S∈[%.2f,%.2f]  (%.0f s)",
+                 Dates.format(date, "yyyy-mm-dd HH:MM"), umax, vmax, ηmin, ηmax, Smin, Smax, time() - wall[]))
     wall[] = time()
     return nothing
 end
-add_callback!(simulation, progress, TimeInterval(6hours))
+# MAB_PROGRESS_MINUTES (default 360) sets how often the progress line is printed; shorten it to watch a run that may blow up
+const PROGRESS_MINUTES = parse(Float64, get(ENV, "MAB_PROGRESS_MINUTES", "360"))
+add_callback!(simulation, progress, TimeInterval(PROGRESS_MINUTES * 60))
 
 const λf = λnodes(ggrid, Face());   const λc = λnodes(ggrid, Center())     # whole-domain node positions
 const φf = φnodes(ggrid, Face());   const φc = φnodes(ggrid, Center())
