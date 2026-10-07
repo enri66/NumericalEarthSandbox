@@ -1001,7 +1001,9 @@ if !isempty(MOORINGS)
         oc = sim.model.ocean.model
         u, v = oc.velocities.u, oc.velocities.v
         T, S = oc.tracers.T, oc.tracers.S
-        κc = oc.closure_fields.κc; κu = oc.closure_fields.κu; e = oc.tracers.e
+        # with rivers the closure is a tuple (CATKE plus the river-mouth diffusivity): take CATKE's fields
+        catke_fields = oc.closure_fields isa Tuple ? first(filter(f -> hasproperty(f, :κc), oc.closure_fields)) : oc.closure_fields
+        κc = catke_fields.κc; κu = catke_fields.κu; e = oc.tracers.e
         atm = sim.model.interfaces.exchanger.atmosphere.state
         ao  = sim.model.interfaces.atmosphere_ocean_interface.fluxes
         for c in mine
