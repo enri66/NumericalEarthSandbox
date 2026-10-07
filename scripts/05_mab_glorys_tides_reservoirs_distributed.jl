@@ -933,8 +933,17 @@ if STAGE == "steps"
             end
         end
     end
+    # MAB_SYNC_HALOS=true: fill the ocean fields' halos and wait for the exchange to finish before each step
+    sync_halos = get(ENV, "MAB_SYNC_HALOS", "false") == "true"
+    function sync_ocean_halos!()
+        for f in (oc.velocities.u, oc.velocities.v, oc.tracers.T, oc.tracers.S, oc.tracers.e)
+            Oceananigans.BoundaryConditions.fill_halo_regions!(f)
+            Oceananigans.DistributedComputations.synchronize_communication!(f)
+        end
+    end
     0 in dumps && dump_state(0)
     for n in 1:nsteps
+        sync_halos && sync_ocean_halos!()
         time_step!(model, Δt_baroclinic)
         n in dumps && dump_state(n)
     end
