@@ -206,15 +206,16 @@ whole_grid = LatitudeLongitudeGrid(CPU(); size = (Nλ, Nφ, Nz),
                                    longitude = λ_bounds, latitude = φ_bounds, z, halo = (7, 7, 7))
 make_bathymetry() = regrid_bathymetry(whole_grid; dataset = ETOPO2022(), height_above_water = 1,
                                       minimum_depth = 10, major_basins = 1, interpolation_passes = 10)
-# Rank 0 regrids (and caches) the bathymetry and sends the array to the others. Having every rank read the cache
-# does not work on a new grid: the file is not yet visible to the other ranks after the barrier on the shared
-# filesystem, so they all regrid and write it at once and corrupt it.
-bottom_height = rank == 0 ? make_bathymetry() : Field{Center, Center, Nothing}(whole_grid)
-let data = Array(interior(bottom_height))
-    MPI.Bcast!(data, 0, comm)
-    rank != 0 && set!(bottom_height, data)
+# `regrid_bathymetry` starts with `download`, which has an MPI barrier (`@root`) that every rank must reach, and on this
+# non-distributed grid each rank then loads the cache or regrids and writes it. So on a grid with no cache yet, rank 0
+# regrids and writes it while the others wait in the matching barriers; afterwards every rank loads the finished cache.
+if rank == 0
+    make_bathymetry()                     # the barrier inside `download`, then regrid and write the cache
+else
+    MPI.Barrier(comm)                     # matches the barrier inside rank 0's `download`
 end
-Oceananigans.BoundaryConditions.fill_halo_regions!(bottom_height)
+MPI.Barrier(comm)                         # rank 0 has written the cache
+bottom_height = make_bathymetry()         # all ranks: the barrier inside `download`, then load the cache
 if LAND_FRACTION > 0
     include(joinpath(@__DIR__, "land_fraction_mask.jl"))
     apply_land_fraction!(bottom_height, whole_grid, LAND_FRACTION; minimum_depth = 10, say)
