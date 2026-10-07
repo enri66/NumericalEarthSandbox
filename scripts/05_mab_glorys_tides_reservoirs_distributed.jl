@@ -807,8 +807,12 @@ BOTTOM_DRAG == 0.003 || say("bottom drag coefficient Cᴰ = $BOTTOM_DRAG")
 # pulls salinity back toward GLORYS and so works against the rivers: turn it down or off together with them.
 const RIVERS = get(ENV, "MAB_RIVERS", "false") == "true"
 const RIVER_MIXING_DEPTH = parse(Float64, get(ENV, "MAB_RIVER_MIXING_DEPTH", "10"))
-land = RIVERS ? GloFASPrescribedLand(grid; start_date, end_date = stop_date, dir = joinpath(DATA_DIR, "glofas"),
-                                     region = BoundingBox(longitude = data_λ, latitude = data_φ)) : nothing
+# MAB_RIVER_EXTRA (default true) adds the Hudson and the Delaware by hand: GloFAS's automatic mouth detection misses them
+# (see glofas_land.jl)
+const RIVER_EXTRA = get(ENV, "MAB_RIVER_EXTRA", "true") == "true"
+RIVERS && include(joinpath(@__DIR__, "glofas_land.jl"))
+land = RIVERS ? glofas_land_with_mouths(grid; extra_mouths = RIVER_EXTRA ? MAB_EXTRA_MOUTHS : [], start_date, end_date = stop_date,
+                                        dir = joinpath(DATA_DIR, "glofas"), region = BoundingBox(longitude = data_λ, latitude = data_φ), say) : nothing
 RIVERS && say("rivers: GloFAS discharge routed onto the coast, river-mouth mixing over the top $(RIVER_MIXING_DEPTH) m")
 river_kw = RIVERS ? (; river_routing = land.river_routing, river_mouth_mixing_depth = RIVER_MIXING_DEPTH) : (;)
 ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw..., advection_kw...,
