@@ -818,7 +818,8 @@ const RIVER_SEARCH_CELLS = parse(Int, get(ENV, "MAB_RIVER_SEARCH_CELLS", string(
 const RIVER_SPREAD_CELLS = parse(Int, get(ENV, "MAB_RIVER_SPREAD_CELLS", string(round(Int, 8 * CELLS_PER_DEGREE / 12))))
 land = RIVERS ? glofas_land_with_mouths(grid; extra_mouths = RIVER_EXTRA ? MAB_EXTRA_MOUTHS : [], start_date, end_date = stop_date,
                                         dir = joinpath(DATA_DIR, "glofas"), region = BoundingBox(longitude = data_λ, latitude = data_φ),
-                                        maximum_spread_cells = RIVER_SPREAD_CELLS, maximum_search_radius = RIVER_SEARCH_CELLS, say) : nothing
+                                        maximum_spread_cells = RIVER_SPREAD_CELLS, maximum_search_radius = RIVER_SEARCH_CELLS, say,
+                                        routing_grid = ggrid, block = (I_OFF, J_OFF, dist_grid.Nx, dist_grid.Ny)) : nothing
 RIVERS && say("rivers: GloFAS discharge, each river split over $RIVER_SPREAD_CELLS cells, routed onto the coast, river-mouth mixing over the top $(RIVER_MIXING_DEPTH) m")
 river_kw = RIVERS ? (; river_routing = land.river_routing, river_mouth_mixing_depth = RIVER_MIXING_DEPTH) : (;)
 ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw..., advection_kw...,

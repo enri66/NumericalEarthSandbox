@@ -102,3 +102,18 @@ end
 @printf("discharge delivered %.0f of %.0f m³/s into %d ocean cells\n", sum(delivered), sum(filter(isfinite, Q)), Nt)
 far = [m for m in eachindex(oi) if haskey(per_mouth, m) && isfinite(Q[m]) && Q[m] > 1 && any(x -> 111.0 * sqrt(((λc[tcell[1][x[1]]] - oλ[m]) * cosd(oφ[m]))^2 + (φc[tcell[2][x[1]]] - oφ[m])^2) > 50, per_mouth[m])]
 println("mouths over 1 m³/s with a receiving cell more than 50 km away: ", length(far))
+
+# The distributed path: cut the whole-domain routing into a 4 x 2 block layout (as the test runs use) and check that the
+# blocks together deliver the same discharge and every destination cell lands in exactly one block.
+let nxb = Nλ ÷ 4, nyb = Nφ ÷ 2, total_blocks = 0.0, ncells = 0
+    for bi in 0:3, bj in 0:1
+        r = localize_routing(routing, bi * nxb, bj * nyb, nxb, nyb, CPU())
+        ncells += length(r.target_i)
+        toff = Array(r.offsets); w = Array(r.contribution_weight); coi = Array(r.contribution_outlet_i); coj = Array(r.contribution_outlet_j)
+        for c in eachindex(r.target_i), k in toff[c]:toff[c+1]-1
+            m = mouth_index[(coi[k], coj[k])]
+            isfinite(Q[m]) && (total_blocks += w[k] * Q[m] * Azᶜᶜᶜ(r.target_i[c] + bi * nxb, r.target_j[c] + bj * nyb, 1, ibg) / 1000)
+        end
+    end
+    @printf("4 x 2 blocks: %d of %d destination cells kept, discharge delivered %.0f of %.0f m³/s\n", ncells, Nt, total_blocks, sum(delivered))
+end
