@@ -18,26 +18,39 @@ const eos = SWP.TEOS10.TEOS10EquationOfState()
 run_prefix(tag) = isabspath(tag) ? tag : joinpath(OUT, tag)
 
 # ---------------- run output ----------------
-# Script 05 writes one file per MPI rank (`_rank<r>`), and Oceananigans combines them on an ImmersedBoundaryGrid only
-# when given the global grid, so that grid is rebuilt from the ranks' own grids (slabs in x). Reading those grids needs
-# the MPI environment the run used (e.g. /t0/workdir/enrique/mpi05_ib on triton).
-function global_grid(path)
+# Script 05 writes one file per MPI rank (`_rank<r>`), in a px × py layout (MAB_PARTITION_X, MAB_PARTITION_Y). The ranks'
+# own grids tell where each piece sits: `rank_blocks` returns the file paths as a matrix [x-block, y-block], with the
+# blocks ordered by the longitude and latitude of each piece's first face.
+function rank_blocks(path)
     stem = basename(splitext(path)[1])
     paths = filter(f -> occursin(Regex("^" * stem * "_rank\\d+\\.jld2\$"), basename(f)), readdir(dirname(path); join = true))
-    grids = [JLD2.jldopen(f -> f["serialized/grid"], p) for p in paths]
-    ugs = [g.underlying_grid for g in grids]
-    order = sortperm([ug.λᶠᵃᵃ[1] for ug in ugs])
-    function bottom(r)
-        b = grids[r].immersed_boundary.bottom_height
-        n, m = ugs[r].Nx, ugs[r].Ny
-        return ndims(b) == 2 ? collect(b[1:n, 1:m]) : collect(b[1:n, 1:m, 1])
+    ugs = [JLD2.jldopen(f -> f["serialized/grid"], p).underlying_grid for p in paths]
+    λ0 = [round(ug.λᶠᵃᵃ[1]; digits = 6) for ug in ugs]; φ0 = [round(ug.φᵃᶠᵃ[1]; digits = 6) for ug in ugs]
+    λs = sort(unique(λ0)); φs = sort(unique(φ0))
+    blocks = Matrix{String}(undef, length(λs), length(φs))
+    for (n, p) in enumerate(paths)
+        blocks[findfirst(==(λ0[n]), λs), findfirst(==(φ0[n]), φs)] = p
     end
-    bh = cat([bottom(r) for r in order]...; dims = 1)
-    first_ug, last_ug = ugs[order[1]], ugs[order[end]]
-    Ny, Nz = first_ug.Ny, first_ug.Nz
-    g = LatitudeLongitudeGrid(CPU(); size = (size(bh, 1), Ny, Nz),
+    return blocks
+end
+
+# Global grid, rebuilt from the ranks' own grids (reading them needs the MPI environment the run used, e.g.
+# /t0/workdir/enrique/mpi05_ib on triton)
+function global_grid(path)
+    blocks = rank_blocks(path)
+    grids = Dict(b => JLD2.jldopen(f -> f["serialized/grid"], blocks[b]) for b in CartesianIndices(blocks))
+    ug(b) = grids[b].underlying_grid
+    function bottom(b)
+        a = grids[b].immersed_boundary.bottom_height
+        n, m = ug(b).Nx, ug(b).Ny
+        return ndims(a) == 2 ? collect(a[1:n, 1:m]) : collect(a[1:n, 1:m, 1])
+    end
+    bh = reduce(vcat, [reduce(hcat, [bottom(CartesianIndex(a, b)) for b in 1:size(blocks, 2)]) for a in 1:size(blocks, 1)])
+    first_ug, last_ug = ug(CartesianIndex(1, 1)), ug(CartesianIndex(size(blocks)...))
+    Nz = first_ug.Nz
+    g = LatitudeLongitudeGrid(CPU(); size = (size(bh, 1), size(bh, 2), Nz),
                               longitude = (first_ug.λᶠᵃᵃ[1], last_ug.λᶠᵃᵃ[last_ug.Nx + 1]),
-                              latitude = (first_ug.φᵃᶠᵃ[1], first_ug.φᵃᶠᵃ[Ny + 1]),
+                              latitude = (first_ug.φᵃᶠᵃ[1], last_ug.φᵃᶠᵃ[last_ug.Ny + 1]),
                               z = collect(znodes(first_ug, Face())), halo = Oceananigans.Grids.halo_size(first_ug))
     return ImmersedBoundaryGrid(g, GridFittedBottom(bh))
 end
@@ -51,7 +64,7 @@ end
 # All frames of a horizontal-slice output (the surface and SSH files) as an (x, y, frame) array, with their times.
 # Oceananigans' combining reader expects full-depth fields, so script 05's per-rank slices are joined here instead:
 # each rank's interior is cut out of its array, with the halo widths inferred from the array size (the split-explicit
-# free surface keeps wider halos than the other fields).
+# free surface keeps wider halos than the other fields), and the pieces are laid out in the ranks' px × py arrangement.
 isface(L) = L === Face || L isa Face
 
 function surface_series(path, name)
@@ -59,27 +72,29 @@ function surface_series(path, name)
         fts = FieldTimeSeries(path, name)
         return cat([Array(interior(fts[n]))[:, :, 1] for n in eachindex(fts.times)]...; dims = 3), collect(fts.times)
     end
-    stem = basename(splitext(path)[1])
-    paths = filter(f -> occursin(Regex("^" * stem * "_rank\\d+\\.jld2\$"), basename(f)), readdir(dirname(path); join = true))
-    files = [JLD2.jldopen(p, "r") for p in paths]
-    ugs = [f["serialized/grid"].underlying_grid for f in files]
-    order = sortperm([ug.λᶠᵃᵃ[1] for ug in ugs])
-    files, ugs = files[order], ugs[order]
-    loc = files[1]["timeseries/$name/serialized/location"]
-    iterations = sort(parse.(Int, filter(!=("serialized"), collect(keys(files[1]["timeseries/$name"])))))
-    times = [files[1]["timeseries/t/$it"] for it in iterations]
+    blocks = rank_blocks(path)
+    nbx, nby = size(blocks)
+    files = Dict(b => JLD2.jldopen(blocks[b], "r") for b in CartesianIndices(blocks))
+    ref = files[CartesianIndex(1, 1)]
+    loc = ref["timeseries/$name/serialized/location"]
+    iterations = sort(parse.(Int, filter(!=("serialized"), collect(keys(ref["timeseries/$name"])))))
+    times = [ref["timeseries/t/$it"] for it in iterations]
     frames = map(iterations) do it
-        parts = map(eachindex(files)) do r
-            a = files[r]["timeseries/$name/$it"]
-            a = ndims(a) == 2 ? a : a[:, :, end]
-            nx = ugs[r].Nx + (isface(loc[1]) && r == length(files) ? 1 : 0)
-            ny = ugs[r].Ny + (isface(loc[2]) ? 1 : 0)
-            hx = (size(a, 1) - nx) ÷ 2; hy = (size(a, 2) - ny) ÷ 2
-            a[hx+1:hx+nx, hy+1:hy+ny]
+        rows = map(1:nbx) do a
+            cols = map(1:nby) do b
+                f = files[CartesianIndex(a, b)]; u = f["serialized/grid"].underlying_grid
+                arr = f["timeseries/$name/$it"]
+                arr = ndims(arr) == 2 ? arr : arr[:, :, end]
+                nx = u.Nx + (isface(loc[1]) && a == nbx ? 1 : 0)
+                ny = u.Ny + (isface(loc[2]) && b == nby ? 1 : 0)
+                hx = (size(arr, 1) - nx) ÷ 2; hy = (size(arr, 2) - ny) ÷ 2
+                arr[hx+1:hx+nx, hy+1:hy+ny]
+            end
+            reduce(hcat, cols)
         end
-        cat(parts...; dims = 1)
+        reduce(vcat, rows)
     end
-    close.(files)
+    close.(values(files))
     return cat(frames...; dims = 3), times
 end
 

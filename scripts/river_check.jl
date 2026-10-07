@@ -5,6 +5,7 @@
 #
 #   MAB_CELLS_PER_DEGREE=24 MAB_LAND_FRACTION=0.5 MAB_MASK_CLEANUP=true julia --project=. scripts/river_check.jl
 using NumericalEarth, Oceananigans, Dates, Printf
+using CDSAPI      # activates NumericalEarth's GloFAS backend
 using NumericalEarth.DataWrangling: Metadata, Metadatum, BoundingBox
 using NumericalEarth.Lands: coastal_outlet_indices
 include(joinpath(@__DIR__, "land_fraction_mask.jl"))
