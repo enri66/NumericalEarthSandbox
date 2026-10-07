@@ -926,6 +926,11 @@ if STAGE == "steps"
                                 ("u", oc.velocities.u), ("v", oc.velocities.v), ("T", oc.tracers.T))
                 f[name * "_p"] = Array(parent(fld)); f[name * "_halo"] = collect(Oceananigans.Grids.halo_size(fld.grid))
             end
+            # the net surface fluxes handed to the ocean, and the air-sea momentum flux with its halo
+            nf = model.interfaces.net_fluxes.ocean
+            f["tau_x"] = Array(interior(nf.u)); f["tau_y"] = Array(interior(nf.v)); f["J_T"] = Array(interior(nf.T))
+            ao = model.interfaces.atmosphere_ocean_interface.fluxes
+            f["ao_x_p"] = Array(parent(ao.x_momentum)); f["ao_x_halo"] = collect(Oceananigans.Grids.halo_size(ao.x_momentum.grid))
             # the surface flux each prognostic field receives (top boundary condition), where it is a field
             for (name, fld) in (("u", oc.velocities.u), ("v", oc.velocities.v), ("T", oc.tracers.T), ("S", oc.tracers.S))
                 q = fld.boundary_conditions.top.condition

@@ -19,7 +19,7 @@ ref = tags[1]
 steps = sort(unique(parse(Int, match(r"_state(\d+)_rank", f).captures[1]) for f in readdir(dirname(ref)) if startswith(f, basename(ref) * "_state")))
 for other in tags[2:end]
     println("== ", basename(ref), " vs ", basename(other))
-    for n in steps, name in ("eta", "u", "v", "T", "S", "e", "Jtop_u", "Jtop_v", "Jtop_T", "Jtop_S")
+    for n in steps, name in ("eta", "u", "v", "T", "S", "e", "tau_x", "tau_y", "J_T")
         A = try assemble(ref, n, name) catch; continue end; B = assemble(other, n, name)
         size(A) == size(B) || (println("  step $n $name: shapes differ ", size(A), " ", size(B)); continue)
         D = abs.(A .- B); D[.!isfinite.(D)] .= 0
