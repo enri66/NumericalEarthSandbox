@@ -204,18 +204,14 @@ z = ExponentialDiscretization(Nz, -Z_BOTTOM, 0; scale = exponential_scale(Nz, Z_
 # The whole-domain grid and bathymetry: the same on every rank, computed serially exactly as in 04.
 whole_grid = LatitudeLongitudeGrid(CPU(); size = (Nλ, Nφ, Nz),
                                    longitude = λ_bounds, latitude = φ_bounds, z, halo = (7, 7, 7))
-make_bathymetry() = regrid_bathymetry(whole_grid; dataset = ETOPO2022(), height_above_water = 1,
+# Every rank regrids the bathymetry itself, with the disk cache off. `regrid_bathymetry` calls `download`, whose `@root` has
+# an MPI barrier, only when the cache misses, so with the cache on the number of barriers depends on whether each rank
+# sees a cache file: ranks drift out of step (hang) or all regrid and write the file at once (truncated file). With the
+# cache off every rank makes exactly one matching barrier call, reads nothing and writes nothing. The cost is a regrid
+# at every start (seconds at 1/12 degree, minutes at 1/60 degree).
+make_bathymetry() = regrid_bathymetry(whole_grid; dataset = ETOPO2022(), height_above_water = 1, cache = false,
                                       minimum_depth = 10, major_basins = 1, interpolation_passes = 10)
-# `regrid_bathymetry` starts with `download`, which has an MPI barrier (`@root`) that every rank must reach, and on this
-# non-distributed grid each rank then loads the cache or regrids and writes it. So on a grid with no cache yet, rank 0
-# regrids and writes it while the others wait in the matching barriers; afterwards every rank loads the finished cache.
-if rank == 0
-    make_bathymetry()                     # the barrier inside `download`, then regrid and write the cache
-else
-    MPI.Barrier(comm)                     # matches the barrier inside rank 0's `download`
-end
-MPI.Barrier(comm)                         # rank 0 has written the cache
-bottom_height = make_bathymetry()         # all ranks: the barrier inside `download`, then load the cache
+bottom_height = make_bathymetry()
 if LAND_FRACTION > 0
     include(joinpath(@__DIR__, "land_fraction_mask.jl"))
     apply_land_fraction!(bottom_height, whole_grid, LAND_FRACTION; minimum_depth = 10, say)
