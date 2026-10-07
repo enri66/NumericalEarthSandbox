@@ -926,6 +926,11 @@ if STAGE == "steps"
                                 ("u", oc.velocities.u), ("v", oc.velocities.v), ("T", oc.tracers.T))
                 f[name * "_p"] = Array(parent(fld)); f[name * "_halo"] = collect(Oceananigans.Grids.halo_size(fld.grid))
             end
+            # the surface flux each prognostic field receives (top boundary condition), where it is a field
+            for (name, fld) in (("u", oc.velocities.u), ("v", oc.velocities.v), ("T", oc.tracers.T), ("S", oc.tracers.S))
+                q = fld.boundary_conditions.top.condition
+                q isa Oceananigans.Fields.AbstractField && (f["Jtop_" * name] = Array(interior(q)))
+            end
         end
     end
     0 in dumps && dump_state(0)
