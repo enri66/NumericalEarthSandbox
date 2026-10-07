@@ -58,6 +58,7 @@ using Oceananigans.BoundaryConditions: PerturbationAdvection, NormalRadiation, O
                                        GravityWaveRadiationBoundaryCondition,
                                        SurfaceWaveRadiationBoundaryCondition
 using Dates, Printf, Statistics
+using NumericalEarth.DataWrangling: jldopen
 
 include(joinpath(@__DIR__, "glorys_bathymetry.jl"))
 
@@ -895,6 +896,30 @@ if STAGE == "model"
                  allmax(maximum(abs, interior(oc0.free_surface.displacement))),
                  allsum(sum(interior(oc0.tracers.T))), allsum(sum(interior(oc0.tracers.S)))))
     say("stopping before time stepping (MAB_STAGE=model)")
+    exit(0)
+end
+
+# MAB_STAGE=steps: take MAB_STEPS time steps of Δt and write the prognostic fields of this rank after each step listed in
+# MAB_DUMP_STEPS (comma-separated, 0 = before the first step) to <tag>_state<n>_rank<r>.jld2, then stop. For comparing layouts
+# step by step (compare_layouts.jl): the same case on one rank and split should agree to rounding.
+if STAGE == "steps"
+    oc = ocean.model
+    nsteps = parse(Int, get(ENV, "MAB_STEPS", "10"))
+    dumps = parse.(Int, split(get(ENV, "MAB_DUMP_STEPS", "0,1,2,5,10"), ","))
+    function dump_state(n)
+        jldopen("$(TAG)_state$(n)_rank$(rank).jld2", "w") do f
+            f["I_OFF"] = I_OFF; f["J_OFF"] = J_OFF
+            f["u"] = Array(interior(oc.velocities.u)); f["v"] = Array(interior(oc.velocities.v)); f["w"] = Array(interior(oc.velocities.w))
+            f["T"] = Array(interior(oc.tracers.T)); f["S"] = Array(interior(oc.tracers.S))
+            f["e"] = Array(interior(oc.tracers.e)); f["eta"] = Array(interior(oc.free_surface.displacement))
+        end
+    end
+    0 in dumps && dump_state(0)
+    for n in 1:nsteps
+        time_step!(model, Δt_baroclinic)
+        n in dumps && dump_state(n)
+    end
+    say("took $nsteps steps (MAB_STAGE=steps)")
     exit(0)
 end
 
