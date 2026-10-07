@@ -21,7 +21,9 @@ const MAB_EXTRA_MOUTHS = [(name = "Hudson",   glofas_λ = -73.925, glofas_φ = 4
 function glofas_land_with_mouths(grid; extra_mouths = MAB_EXTRA_MOUTHS, dataset = GloFASReanalysis(), start_date, end_date, dir, region,
                                  time_indices_in_memory = 10, time_indexing = Oceananigans.OutputReaders.Cyclical(),
                                  freshwater_density = 1000, maximum_search_radius = 5, spread_radius = 1.2, maximum_spread_cells = 8, say = println)
-    arch = architecture(grid)
+    # The GloFAS data are global-window fields, not partitioned over ranks (as for ERA5): build them on the CPU, and only the
+    # routing onto `grid` (which may be distributed) uses the model grid.
+    arch = CPU()
     discharge_meta = Metadata(:river_discharge; dataset, start_date, end_date, dir, region)
     discharge = FieldTimeSeries(discharge_meta, arch; time_indexing, time_indices_in_memory)
 
