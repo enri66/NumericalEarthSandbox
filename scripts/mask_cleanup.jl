@@ -67,6 +67,18 @@ function apply_overrides!(wet, overrides, λ, φ)
     return changed
 end
 
+"Read an overrides CSV (see the header; lines starting with # are comments) into the table `apply_overrides!` takes."
+function read_overrides(path)
+    overrides = []
+    for line in readlines(path)
+        (isempty(strip(line)) || startswith(strip(line), "#")) && continue
+        f = split(strip(line), ",")
+        push!(overrides, length(f) == 3 ? (; action = String(f[1]), i = parse(Int, f[2]), j = parse(Int, f[3])) :
+                         (; action = String(f[1]), lon0 = parse(Float64, f[2]), lon1 = parse(Float64, f[3]), lat0 = parse(Float64, f[4]), lat1 = parse(Float64, f[5])))
+    end
+    return overrides
+end
+
 """
     clean_mask(wet; open_sides, overrides = [], λ = nothing, φ = nothing, say = println) -> cleaned wet mask
 

@@ -217,6 +217,21 @@ if LAND_FRACTION > 0
     apply_land_fraction!(bottom_height, whole_grid, LAND_FRACTION; minimum_depth = 10, say)
 end
 
+# MAB_MASK_CLEANUP=true (default false): clean the coastline (mask_cleanup.jl: water cut off from the open ocean, one-cell
+# dead-end bays) and apply the cells you flagged (MAB_MASK_OVERRIDES, a CSV); every rank does the same computation
+const MASK_CLEANUP = get(ENV, "MAB_MASK_CLEANUP", "false") == "true"
+if MASK_CLEANUP
+    include(joinpath(@__DIR__, "mask_cleanup.jl"))
+    h = Array(interior(bottom_height))[:, :, 1]
+    wet0 = h .< 0
+    overrides = isempty(get(ENV, "MAB_MASK_OVERRIDES", "")) ? [] : read_overrides(ENV["MAB_MASK_OVERRIDES"])
+    wet = clean_mask(wet0; overrides, λ = collect(λnodes(whole_grid, Center())), φ = collect(φnodes(whole_grid, Center())), say)
+    h[wet0 .& .!wet] .= 1.0                       # cells that became land (the height_above_water used above)
+    h[.!wet0 .& wet] .= -10.0                     # cells an override made wet: the minimum depth
+    set!(bottom_height, h)
+    Oceananigans.BoundaryConditions.fill_halo_regions!(bottom_height)
+end
+
 if MATCH_BATHY
     match_boundary_bathymetry!(bottom_height, whole_grid, DATA_DIR;
                                region = BoundingBox(longitude = data_λ, latitude = data_φ),

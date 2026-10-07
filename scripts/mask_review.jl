@@ -29,15 +29,7 @@ wet0 = h .< 0
 λ = collect(Oceananigans.Grids.λnodes(grid, Oceananigans.Face()))[1:end-1] .+ (λ_bounds[2] - λ_bounds[1]) / Nλ / 2
 φ = collect(Oceananigans.Grids.φnodes(grid, Oceananigans.Face()))[1:end-1] .+ (φ_bounds[2] - φ_bounds[1]) / Nφ / 2
 
-overrides = []
-if !isempty(get(ENV, "MASK_OVERRIDES", ""))
-    for line in readlines(ENV["MASK_OVERRIDES"])
-        (isempty(strip(line)) || startswith(line, "#")) && continue
-        f = split(strip(line), ",")
-        push!(overrides, length(f) == 3 ? (; action = f[1], i = parse(Int, f[2]), j = parse(Int, f[3])) :
-                         (; action = f[1], lon0 = parse(Float64, f[2]), lon1 = parse(Float64, f[3]), lat0 = parse(Float64, f[4]), lat1 = parse(Float64, f[5])))
-    end
-end
+overrides = isempty(get(ENV, "MASK_OVERRIDES", "")) ? [] : read_overrides(ENV["MASK_OVERRIDES"])
 
 wet = clean_mask(wet0; overrides, λ, φ)
 connected = ocean_connected(wet0)
