@@ -589,9 +589,14 @@ U_bcs = FieldBoundaryConditions(grid, (Face(), Center(), nothing);
 V_bcs = FieldBoundaryConditions(grid, (Center(), Face(), nothing);
     south = GravityWaveRadiationBoundaryCondition(V_south; discrete_form = true),
     north = GravityWaveRadiationBoundaryCondition(V_north; discrete_form = true))
-η_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face());
-    west = SurfaceWaveRadiationBoundaryCondition(), east = SurfaceWaveRadiationBoundaryCondition(),
-    south = SurfaceWaveRadiationBoundaryCondition(), north = SurfaceWaveRadiationBoundaryCondition())
+# MAB_ETA_BC: "chapman" (default, SurfaceWaveRadiation on η at the open boundaries) or "default" (Oceananigans' default
+# halo fill for η), for testing
+const ETA_BC = get(ENV, "MAB_ETA_BC", "chapman")
+η_bcs = ETA_BC == "chapman" ?
+    FieldBoundaryConditions(grid, (Center(), Center(), Face());
+        west = SurfaceWaveRadiationBoundaryCondition(), east = SurfaceWaveRadiationBoundaryCondition(),
+        south = SurfaceWaveRadiationBoundaryCondition(), north = SurfaceWaveRadiationBoundaryCondition()) :
+    FieldBoundaryConditions(grid, (Center(), Center(), Face()))
 
 boundary_conditions = (u = u_bcs, v = v_bcs, T = tracer_bcs(fts_T), S = tracer_bcs(fts_S),
                        U = U_bcs, V = V_bcs, η = η_bcs)
