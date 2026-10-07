@@ -782,8 +782,19 @@ MOMENTUM_ADVECTION == "default" || say("momentum advection: WENOVectorInvariant,
 # Quadratic bottom drag coefficient (NumericalEarth's default 0.003, semi-implicit)
 const BOTTOM_DRAG = parse(Float64, get(ENV, "MAB_BOTTOM_DRAG", "0.003"))
 BOTTOM_DRAG == 0.003 || say("bottom drag coefficient Cᴰ = $BOTTOM_DRAG")
+# River discharge (MAB_RIVERS=true): GloFAS daily discharge at the river mouths inside the domain, deposited on the coastal
+# wet cells as a freshwater flux (download_glofas.jl fetches the files into DATA_DIR/glofas). The ocean also gets extra
+# vertical mixing in the top MAB_RIVER_MIXING_DEPTH m of the cells receiving a river (river_mouth_vertical_diffusivity),
+# so a plume held in one surface cell cannot drive the salinity to zero. The surface salinity restoring (MAB_SSS_PISTON)
+# pulls salinity back toward GLORYS and so works against the rivers: turn it down or off together with them.
+const RIVERS = get(ENV, "MAB_RIVERS", "false") == "true"
+const RIVER_MIXING_DEPTH = parse(Float64, get(ENV, "MAB_RIVER_MIXING_DEPTH", "10"))
+land = RIVERS ? GloFASPrescribedLand(grid; start_date, end_date = stop_date, dir = joinpath(DATA_DIR, "glofas"),
+                                     region = BoundingBox(longitude = data_λ, latitude = data_φ)) : nothing
+RIVERS && say("rivers: GloFAS discharge routed onto the coast, river-mouth mixing over the top $(RIVER_MIXING_DEPTH) m")
+river_kw = RIVERS ? (; river_routing = land.river_routing, river_mouth_mixing_depth = RIVER_MIXING_DEPTH) : (;)
 ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw..., advection_kw...,
-                         bottom_drag_coefficient = BOTTOM_DRAG)
+                         river_kw..., bottom_drag_coefficient = BOTTOM_DRAG)
 
 if CONSISTENT_UBC
     # Built on the whole-domain grid, on every rank, so it does not depend on which boundaries a rank owns.
@@ -844,7 +855,7 @@ atmosphere = ERA5PrescribedAtmosphere(; start_date, end_date = stop_date, region
                                       dir = joinpath(DATA_DIR, "era5"), ERA5_KW...)
 radiation  = ERA5PrescribedRadiation(;  start_date, end_date = stop_date, region,
                                       dir = joinpath(DATA_DIR, "era5"), ERA5_KW...)
-model = OceanOnlyModel(ocean; atmosphere, radiation)
+model = OceanOnlyModel(ocean; atmosphere, radiation, land)
 simulation = Simulation(model; Δt = Δt_baroclinic, stop_time = sim_days * days, stop_iteration = STOP_ITERATION)
 
 # MAB_STAGE=model: everything is built and initialised; report the initial state and stop before time stepping.
@@ -890,6 +901,14 @@ function report_velocity_spike!(sim)
         i, j, k = iu.I; i += I_OFF; j += J_OFF
         @printf("  SPIKE u=%+.2f m/s at (i=%d,j=%d,k=%d) λ=%.3f φ=%.3f z=%.1f m  t=%s\n",
                 ua[iu], i, j, k, λf[i], φc[j], zc[k], prettytime(sim))
+        # the whole column there: u and v at a few levels (k = 1 is the bottom cell, Nz the surface) and the depth mean
+        # of u over the wet cells, to tell a depth-uniform (barotropic) flow from a bottom-intensified one
+        col, vcol = ua[iu.I[1], iu.I[2], :], va[iu.I[1], iu.I[2], :]
+        dz = diff(znodes(ggrid, Face())); wetk = findall(!iszero, col)
+        levels = unique(clamp.([1, 2, 3, 5, 10, 20, 40, 60, 80, Nz], 1, Nz))
+        @printf("    column at that cell: depth-mean u = %+.3f m/s over %d wet levels; u(k) %s; v(k) %s\n",
+                sum(col[wetk] .* dz[wetk]) / sum(dz[wetk]), length(wetk),
+                join([@sprintf("%d:%+.2f", k, col[k]) for k in levels], " "), join([@sprintf("%d:%+.2f", k, vcol[k]) for k in levels], " "))
     end
 
     iv = argmax(abs.(va))
