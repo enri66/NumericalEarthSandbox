@@ -776,7 +776,10 @@ function barotropic_substeps(Δt; cfl = parse(Float64, get(ENV, "MAB_BAROTROPIC_
 end
 const SUBSTEPS = parse(Int, get(ENV, "MAB_SUBSTEPS", string(barotropic_substeps(Δt_baroclinic))))
 say("split-explicit free surface: $SUBSTEPS barotropic substeps per Δt = $(Δt_baroclinic) s (deepest water $(round(Int, -minimum(bh))) m)")
-free_surface = SplitExplicitFreeSurface(grid; substeps = SUBSTEPS)
+# MAB_EXTEND_HALOS (default true): with open boundaries Oceananigans substeps the barotropic mode into extended halos and
+# refills only the physical boundary halos at each substep; "false" fills all halos (with communication) at each substep
+const EXTEND_HALOS = get(ENV, "MAB_EXTEND_HALOS", "true") == "true"
+free_surface = SplitExplicitFreeSurface(grid; substeps = SUBSTEPS, extend_halos = EXTEND_HALOS)
 
 function catke_closure(changes)
     ml  = filter(p -> first(p) in fieldnames(CATKEMixingLength), changes)
