@@ -16,11 +16,13 @@ for n in steps
         r = jldopen(file, "r") do io; Dict(k => io[k] for k in keys(io)); end
         io_, jo = r["I_OFF"], r["J_OFF"]
         println("== step $n, ", basename(file), "  (offsets ", io_, ", ", jo, ")")
-        for name in ("eta", "U", "V", "u", "v", "T")
+        for name in ("eta", "U", "V", "u", "v", "T", "ao_x")
+            haskey(r, name * "_p") && haskey(single, name * "_p") || continue
             A = single[name * "_p"]; HA = single[name * "_halo"]
             B = r[name * "_p"];      HB = r[name * "_halo"]
-            nx = size(r[name == "U" || name == "V" ? "eta" : name], 1)   # interior extent of this rank (centre count for η/U/V)
-            ny = size(r[name == "U" || name == "V" ? "eta" : name], 2)
+            ref = name in ("U", "V", "ao_x") ? "eta" : name                # interior extent of this rank (centre count for 2D fields)
+            nx = size(r[ref], 1)
+            ny = size(r[ref], 2)
             worst = Dict{String, Any}(c => (0.0, ()) for c in ("own", "xhalo", "yhalo", "corner"))
             for k in axes(B, 3), q in axes(B, 2), p in axes(B, 1)
                 i = p - HB[1]; j = q - HB[2]                # local index (may be ≤ 0 or > n in the halo)
