@@ -912,6 +912,12 @@ if STAGE == "steps"
             f["u"] = Array(interior(oc.velocities.u)); f["v"] = Array(interior(oc.velocities.v)); f["w"] = Array(interior(oc.velocities.w))
             f["T"] = Array(interior(oc.tracers.T)); f["S"] = Array(interior(oc.tracers.S))
             f["e"] = Array(interior(oc.tracers.e)); f["eta"] = Array(interior(oc.free_surface.displacement))
+            # whole arrays with their halos, and the halo widths, to compare halo cells across layouts
+            fs = oc.free_surface
+            for (name, fld) in (("eta", fs.displacement), ("U", fs.barotropic_velocities.U), ("V", fs.barotropic_velocities.V),
+                                ("u", oc.velocities.u), ("v", oc.velocities.v), ("T", oc.tracers.T))
+                f[name * "_p"] = Array(parent(fld)); f[name * "_halo"] = collect(Oceananigans.Grids.halo_size(fld.grid))
+            end
         end
     end
     0 in dumps && dump_state(0)
