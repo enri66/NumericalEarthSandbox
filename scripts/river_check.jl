@@ -68,7 +68,10 @@ end
 println("mouths on the window edge: ", count(n -> edge(oλ[n], oφ[n]), eachindex(oi)), " of ", length(oi), ", carrying ",
         @sprintf("%.0f", sum(Q[n] for n in eachindex(oi) if edge(oλ[n], oφ[n]) && isfinite(Q[n]); init = 0.0)), " m³/s")
 
-land = glofas_land_with_mouths(ibg; extra_mouths = EXTRA ? MAB_EXTRA_MOUTHS : [], start_date = date, end_date = date + Day(1), dir = joinpath(DATA_DIR, "glofas"), region)
+const SPREAD = parse(Int, get(ENV, "MAB_RIVER_SPREAD_CELLS", string(round(Int, 8 * CPD / 12))))
+println("each river split over up to ", SPREAD, " cells")
+land = glofas_land_with_mouths(ibg; extra_mouths = EXTRA ? MAB_EXTRA_MOUTHS : [], start_date = date, end_date = date + Day(1), dir = joinpath(DATA_DIR, "glofas"), region,
+                               maximum_spread_cells = SPREAD, maximum_search_radius = round(Int, 5 * CPD / 12))
 routing = land.river_routing.rivers
 Nt = length(routing.target_i)
 println("routing: ", length(routing.contribution_outlet_i), " mouth-to-cell contributions onto ", Nt, " ocean cells")

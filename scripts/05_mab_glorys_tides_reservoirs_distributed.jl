@@ -811,9 +811,15 @@ const RIVER_MIXING_DEPTH = parse(Float64, get(ENV, "MAB_RIVER_MIXING_DEPTH", "10
 # (see glofas_land.jl)
 const RIVER_EXTRA = get(ENV, "MAB_RIVER_EXTRA", "true") == "true"
 RIVERS && include(joinpath(@__DIR__, "glofas_land.jl"))
+# How far, in model cells, a mouth may be from the wet cell that receives it (NumericalEarth's 5 cells is 0.4 degree at
+# 1/12 degree), and over how many wet cells nearest the mouth each river's discharge is split equally (NumericalEarth's 8
+# is tuned for 1/12 degree). Both scale with CELLS_PER_DEGREE / 12 by default, so the footprint keeps its size in km.
+const RIVER_SEARCH_CELLS = parse(Int, get(ENV, "MAB_RIVER_SEARCH_CELLS", string(round(Int, 5 * CELLS_PER_DEGREE / 12))))
+const RIVER_SPREAD_CELLS = parse(Int, get(ENV, "MAB_RIVER_SPREAD_CELLS", string(round(Int, 8 * CELLS_PER_DEGREE / 12))))
 land = RIVERS ? glofas_land_with_mouths(grid; extra_mouths = RIVER_EXTRA ? MAB_EXTRA_MOUTHS : [], start_date, end_date = stop_date,
-                                        dir = joinpath(DATA_DIR, "glofas"), region = BoundingBox(longitude = data_λ, latitude = data_φ), say) : nothing
-RIVERS && say("rivers: GloFAS discharge routed onto the coast, river-mouth mixing over the top $(RIVER_MIXING_DEPTH) m")
+                                        dir = joinpath(DATA_DIR, "glofas"), region = BoundingBox(longitude = data_λ, latitude = data_φ),
+                                        maximum_spread_cells = RIVER_SPREAD_CELLS, maximum_search_radius = RIVER_SEARCH_CELLS, say) : nothing
+RIVERS && say("rivers: GloFAS discharge, each river split over $RIVER_SPREAD_CELLS cells, routed onto the coast, river-mouth mixing over the top $(RIVER_MIXING_DEPTH) m")
 river_kw = RIVERS ? (; river_routing = land.river_routing, river_mouth_mixing_depth = RIVER_MIXING_DEPTH) : (;)
 ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw..., advection_kw...,
                          river_kw..., bottom_drag_coefficient = BOTTOM_DRAG)
