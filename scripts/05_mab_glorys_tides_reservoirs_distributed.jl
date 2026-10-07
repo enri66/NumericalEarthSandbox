@@ -206,8 +206,15 @@ whole_grid = LatitudeLongitudeGrid(CPU(); size = (Nλ, Nφ, Nz),
                                    longitude = λ_bounds, latitude = φ_bounds, z, halo = (7, 7, 7))
 make_bathymetry() = regrid_bathymetry(whole_grid; dataset = ETOPO2022(), height_above_water = 1,
                                       minimum_depth = 10, major_basins = 1, interpolation_passes = 10)
-rank0_first(make_bathymetry)              # the regridded field is cached on disk
-bottom_height = make_bathymetry()
+# Rank 0 regrids (and caches) the bathymetry and sends the array to the others. Having every rank read the cache
+# does not work on a new grid: the file is not yet visible to the other ranks after the barrier on the shared
+# filesystem, so they all regrid and write it at once and corrupt it.
+bottom_height = rank == 0 ? make_bathymetry() : Field{Center, Center, Nothing}(whole_grid)
+let data = Array(interior(bottom_height))
+    MPI.Bcast!(data, 0, comm)
+    rank != 0 && set!(bottom_height, data)
+end
+Oceananigans.BoundaryConditions.fill_halo_regions!(bottom_height)
 if LAND_FRACTION > 0
     include(joinpath(@__DIR__, "land_fraction_mask.jl"))
     apply_land_fraction!(bottom_height, whole_grid, LAND_FRACTION; minimum_depth = 10, say)
