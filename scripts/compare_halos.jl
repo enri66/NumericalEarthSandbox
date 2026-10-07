@@ -21,7 +21,7 @@ for n in steps
             B = r[name * "_p"];      HB = r[name * "_halo"]
             nx = size(r[name == "U" || name == "V" ? "eta" : name], 1)   # interior extent of this rank (centre count for η/U/V)
             ny = size(r[name == "U" || name == "V" ? "eta" : name], 2)
-            worst = Dict("own" => (0.0, ()), "xhalo" => (0.0, ()), "yhalo" => (0.0, ()), "corner" => (0.0, ()))
+            worst = Dict{String, Any}(c => (0.0, ()) for c in ("own", "xhalo", "yhalo", "corner"))
             for k in axes(B, 3), q in axes(B, 2), p in axes(B, 1)
                 i = p - HB[1]; j = q - HB[2]                # local index (may be ≤ 0 or > n in the halo)
                 gi = i + io_; gj = j + jo                   # whole-domain index
