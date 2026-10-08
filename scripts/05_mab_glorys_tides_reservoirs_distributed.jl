@@ -809,6 +809,9 @@ MOMENTUM_ADVECTION == "default" || say("momentum advection: WENOVectorInvariant,
 # Quadratic bottom drag coefficient (NumericalEarth's default 0.003, semi-implicit)
 const BOTTOM_DRAG = parse(Float64, get(ENV, "MAB_BOTTOM_DRAG", "0.003"))
 BOTTOM_DRAG == 0.003 || say("bottom drag coefficient Cᴰ = $BOTTOM_DRAG")
+# MAB_IMPLICIT_DRAG=false: the bottom drag computed explicitly in the tendencies instead of in the vertically implicit step
+const IMPLICIT_DRAG = get(ENV, "MAB_IMPLICIT_DRAG", "true") == "true"
+IMPLICIT_DRAG || say("bottom drag: explicit")
 # River discharge (MAB_RIVERS=true): GloFAS daily discharge at the river mouths inside the domain, deposited on the coastal
 # wet cells as a freshwater flux (download_glofas.jl fetches the files into DATA_DIR/glofas). The ocean also gets extra
 # vertical mixing in the top MAB_RIVER_MIXING_DEPTH m of the cells receiving a river (river_mouth_vertical_diffusivity),
@@ -832,7 +835,7 @@ land = RIVERS ? glofas_land_with_mouths(grid; extra_mouths = RIVER_EXTRA ? MAB_E
 RIVERS && say("rivers: GloFAS discharge, each river split over $RIVER_SPREAD_CELLS cells, routed onto the coast, river-mouth mixing over the top $(RIVER_MIXING_DEPTH) m")
 river_kw = RIVERS ? (; river_routing = land.river_routing, river_mouth_mixing_depth = RIVER_MIXING_DEPTH) : (;)
 ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw..., advection_kw...,
-                         river_kw..., bottom_drag_coefficient = BOTTOM_DRAG)
+                         river_kw..., bottom_drag_coefficient = BOTTOM_DRAG, implicit_bottom_drag = IMPLICIT_DRAG)
 
 if CONSISTENT_UBC
     # Built on the whole-domain grid, on every rank, so it does not depend on which boundaries a rank owns.
@@ -914,13 +917,13 @@ if STAGE == "steps"
     oc = ocean.model
     nsteps = parse(Int, get(ENV, "MAB_STEPS", "10"))
     dumps = parse.(Int, split(get(ENV, "MAB_DUMP_STEPS", "0,1,2,5,10"), ","))
-    # MAB_DUMP_SYNC=true: wait for the halo exchanges in flight before writing, so the dumped halos are the filled ones
+    # MAB_DUMP_SYNC=true: wait for the tracer halo exchanges, which are in flight between steps, before writing. Only the
+    # tracers: synchronizing a field whose exchange has completed unpacks its receive buffers again, and for the
+    # velocities that would undo the barotropic correction of their halos.
     dump_sync = get(ENV, "MAB_DUMP_SYNC", "false") == "true"
     function dump_state(n)
         if dump_sync
-            fs = oc.free_surface
-            for fld in (oc.velocities.u, oc.velocities.v, oc.tracers.T, oc.tracers.S, oc.tracers.e, fs.displacement,
-                        fs.barotropic_velocities.U, fs.barotropic_velocities.V)
+            for fld in (oc.tracers.T, oc.tracers.S, oc.tracers.e)
                 Oceananigans.DistributedComputations.synchronize_communication!(fld)
             end
         end
