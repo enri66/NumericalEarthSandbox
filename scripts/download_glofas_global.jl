@@ -6,7 +6,8 @@
 #   julia --project=. scripts/download_glofas_global.jl
 # GLOFAS_DIR:   the archive (default /Volumes/A3/enrique/GloFAS)
 # GLOFAS_START: first month, YYYY-MM (default 1993-01)
-# GLOFAS_END:   last month, YYYY-MM (default: three months before the current one)
+# GLOFAS_END:   last month, YYYY-MM (default: four months before the current one; the consolidated reanalysis lags by
+#               three to four months, and later months are only in the `intermediate` product)
 using CopernicusClimateDataStore, Dates, Printf
 using NumericalEarth
 const NCD = Base.loaded_modules[only(id for id in keys(Base.loaded_modules) if id.name == "NCDatasets")]   # loaded by NumericalEarth
@@ -14,7 +15,7 @@ const CCDS = CopernicusClimateDataStore
 
 const DIR   = get(ENV, "GLOFAS_DIR", "/Volumes/A3/enrique/GloFAS")
 const FIRST = Date(get(ENV, "GLOFAS_START", "1993-01") * "-01")
-const LAST  = haskey(ENV, "GLOFAS_END") ? Date(ENV["GLOFAS_END"] * "-01") : firstdayofmonth(today()) - Month(3)
+const LAST  = haskey(ENV, "GLOFAS_END") ? Date(ENV["GLOFAS_END"] * "-01") : firstdayofmonth(today()) - Month(4)
 
 const EWDS = CCDS.CDSCredentials("https://ewds.climate.copernicus.eu/api", CCDS.read_cds_credentials().key)
 
