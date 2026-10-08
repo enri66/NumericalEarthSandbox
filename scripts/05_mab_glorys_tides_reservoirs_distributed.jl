@@ -72,14 +72,6 @@ allmax(x) = MPI.Allreduce(x, max, comm)
 allmin(x) = MPI.Allreduce(x, min, comm)
 allsum(x) = MPI.Allreduce(x, +, comm)
 
-# Run `f` on rank 0 first (it may write caches: downloads, inpainting, regridded fields), then on the others.
-function rank0_first(f)
-    rank == 0 && f()
-    MPI.Barrier(comm)
-    rank != 0 && f()
-    MPI.Barrier(comm)
-    return nothing
-end
 
 const PARTITION_X = parse(Int, get(ENV, "MAB_PARTITION_X", string(nranks)))
 const PARTITION_Y = parse(Int, get(ENV, "MAB_PARTITION_Y", "1"))
@@ -284,7 +276,10 @@ say("building GLORYS FieldTimeSeries on the whole-domain source grid (downloads/
 build_glorys_series() = (FieldTimeSeries(meta(:u_velocity),  src_grid), FieldTimeSeries(meta(:v_velocity), src_grid),
                          FieldTimeSeries(meta(:temperature), src_grid), FieldTimeSeries(meta(:salinity),   src_grid),
                          FieldTimeSeries(meta(:free_surface), src_grid))
-rank0_first(build_glorys_series)          # downloads and inpainted files are written by rank 0 only
+# Every rank builds the series at the same time. NumericalEarth downloads files and writes the inpainted caches on rank 0
+# only, inside `@root`, which ends in a barrier on every rank, so the ranks must make the same calls in the same order:
+# running the builder on rank 0 first and then on the others paired those barriers wrongly whenever a cache was missing,
+# and hung the run.
 fts_u, fts_v, fts_T, fts_S, fts_η = build_glorys_series()
 say("  done: $(length(fts_u.times)) times, $(Dates.format(start_date,"yyyy-mm-dd")) → $(Dates.format(stop_date,"yyyy-mm-dd"))")
 
@@ -339,7 +334,6 @@ src_grid_native_z = LatitudeLongitudeGrid(CPU(); size = (Nλ_src, Nφ_src, Nz_na
                                           z = z_native, halo = (7, 7, 7))
 say("building the native-resolution GLORYS u/v for the true depth mean… ($Nz_native levels vs the model's $Nz)")
 build_native_series() = (FieldTimeSeries(meta(:u_velocity), src_grid_native_z), FieldTimeSeries(meta(:v_velocity), src_grid_native_z))
-rank0_first(build_native_series)
 fts_u_native, fts_v_native = build_native_series()
 Hg_src = glorys_deptho_on_grid(src_grid, DATA_DIR; region)
 true_floors = ((-Hg_src[1, :], -Hg_src[end, :]), (-Hg_src[:, 1], -Hg_src[:, end]))
