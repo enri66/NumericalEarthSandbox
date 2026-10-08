@@ -141,4 +141,13 @@ for name in names
     at = d == Δ && Δ > 0 ? (idx[1] + (ri - 1) * size(grid, 1), idx[2] + (rj - 1) * size(grid, 2), idx[3]) : (0, 0, 0)
     at = (MPI.Allreduce(at[1], max, comm), MPI.Allreduce(at[2], max, comm), MPI.Allreduce(at[3], max, comm))
     rank == 0 && @printf("   %s: max|Δ| = %.2e of max %.2e%s\n", name, Δ, M, Δ > 0 ? " at (i, j, k) = $(at)" : "")
+    if haskey(ENV, "SHOWDIFF")
+        bad = findall(abs.(p .- s) .> 1e-12)
+        if !isempty(bad)
+            is = [b[1] for b in bad] .+ (ri - 1) * size(grid, 1); js = [b[2] for b in bad] .+ (rj - 1) * size(grid, 2)
+            ks = [b[3] for b in bad]
+            println("     rank $rank $name: $(length(bad)) cells, i ∈ $(extrema(is)), j ∈ $(extrema(js)), k ∈ $(extrema(ks))")
+        end
+        MPI.Barrier(comm)
+    end
 end
