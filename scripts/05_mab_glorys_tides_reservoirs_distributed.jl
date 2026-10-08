@@ -929,6 +929,14 @@ if STAGE == "steps"
             # the net surface fluxes handed to the ocean, and the air-sea momentum flux with its halo
             nf = model.interfaces.net_fluxes.ocean
             f["tau_x"] = Array(interior(nf.u)); f["tau_y"] = Array(interior(nf.v)); f["J_T"] = Array(interior(nf.T))
+            # every 2D input of the air-sea flux kernel, with halos: the exchanger's ocean and atmosphere states
+            for (side, st) in (("ocn", model.interfaces.exchanger.ocean.state), ("atm", model.interfaces.exchanger.atmosphere.state))
+                for (n, fld) in pairs(st)
+                    fld isa Oceananigans.Fields.AbstractField || continue
+                    a = Array(parent(fld)); ndims(a) == 3 && size(a, 3) > 1 && (a = a[:, :, end:end])
+                    f[side * "_" * string(n) * "_p"] = a; f[side * "_" * string(n) * "_halo"] = collect(Oceananigans.Grids.halo_size(fld.grid))
+                end
+            end
             ao = model.interfaces.atmosphere_ocean_interface.fluxes
             f["ao_x_p"] = Array(parent(ao.x_momentum)); f["ao_x_halo"] = collect(Oceananigans.Grids.halo_size(ao.x_momentum.grid))
             # the surface flux each prognostic field receives (top boundary condition), where it is a field
