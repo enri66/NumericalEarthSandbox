@@ -48,6 +48,7 @@ function download_month(date; attempts = 3)
             mv(part, out; force = true)
             @printf("%s  %s  %.2f GB  %.1f min\n", Dates.format(now(), "yyyy-mm-dd HH:MM"), Dates.format(date, "yyyy-mm"),
                     filesize(out) / 1e9, (time() - t0) / 60)
+            flush(stdout)
             return true
         catch e
             @warn "$(Dates.format(date, "yyyy-mm")), attempt $(attempt) of $(attempts): $(sprint(showerror, e))"
