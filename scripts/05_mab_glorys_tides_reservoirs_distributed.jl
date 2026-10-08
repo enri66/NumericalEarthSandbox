@@ -52,7 +52,7 @@ if get(ENV, "MAB_RIVERS", "false") == "true"
 end
 using Oceananigans
 using Oceananigans.Units
-using Oceananigans.Grids: ExponentialDiscretization, znodes, λnodes, φnodes
+using Oceananigans.Grids: ExponentialDiscretization, MutableVerticalDiscretization, znodes, λnodes, φnodes
 using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities: CATKEMixingLength, CATKEEquation
 using Oceananigans.BoundaryConditions: PerturbationAdvection, NormalRadiation, ObliqueRadiation, TracerReservoir,
                                        GravityWaveRadiationBoundaryCondition,
@@ -197,6 +197,16 @@ end
 
 z = ExponentialDiscretization(Nz, -Z_BOTTOM, 0; scale = exponential_scale(Nz, Z_BOTTOM, Δz_top))
 
+# MAB_BOTTOM=partial: partial bottom cells (PartialCellBottom: the bottom cell of each column is shortened to the real
+# depth, keeping at least MAB_PARTIAL_MIN of its full height) instead of whole-cell steps (GridFittedBottom, the default)
+const BOTTOM = get(ENV, "MAB_BOTTOM", "gridfitted")
+const PARTIAL_MIN = parse(Float64, get(ENV, "MAB_PARTIAL_MIN", "0.2"))
+BOTTOM in ("gridfitted", "partial") || error("MAB_BOTTOM must be gridfitted or partial, got $BOTTOM")
+model_bottom(h) = BOTTOM == "partial" ? PartialCellBottom(h; minimum_fractional_cell_height = PARTIAL_MIN) : GridFittedBottom(h)
+# MAB_ZSTAR=true: a z-star vertical coordinate on the model grid (each column's cells stretch with the free surface by
+# (H + η) / H, and the surface freshwater flux adds volume); the whole-domain grid used for the tables stays static
+const ZSTAR = get(ENV, "MAB_ZSTAR", "false") == "true"
+
 # The whole-domain grid and bathymetry: the same on every rank, computed serially exactly as in 04.
 whole_grid = LatitudeLongitudeGrid(CPU(); size = (Nλ, Nφ, Nz),
                                    longitude = λ_bounds, latitude = φ_bounds, z, halo = (7, 7, 7))
@@ -234,7 +244,7 @@ if MATCH_BATHY
                                n_match = N_MATCH, minimum_depth = 10)
 end
 
-ggrid = ImmersedBoundaryGrid(whole_grid, GridFittedBottom(bottom_height))    # whole-domain immersed grid
+ggrid = ImmersedBoundaryGrid(whole_grid, model_bottom(bottom_height))    # whole-domain immersed grid
 
 # This rank's slab of the domain. `I_OFF`, `J_OFF` turn a local index into a whole-domain one.
 (Nλ % PARTITION_X == 0 && Nφ % PARTITION_Y == 0) ||
@@ -243,13 +253,15 @@ arch = Distributed(CPU(); partition = Partition(x = PARTITION_X, y = PARTITION_Y
 const I_OFF = (arch.local_index[1] - 1) * (Nλ ÷ PARTITION_X)
 const J_OFF = (arch.local_index[2] - 1) * (Nφ ÷ PARTITION_Y)
 
+model_z = ZSTAR ? MutableVerticalDiscretization(collect(znodes(whole_grid, Face()))) : z
 dist_grid = LatitudeLongitudeGrid(arch; size = (Nλ, Nφ, Nz),
-                                  longitude = λ_bounds, latitude = φ_bounds, z, halo = (7, 7, 7))
+                                  longitude = λ_bounds, latitude = φ_bounds, z = model_z, halo = (7, 7, 7))
 local_bottom = Field{Center, Center, Nothing}(dist_grid)
 set!(local_bottom, reshape(Array(interior(bottom_height))[I_OFF+1:I_OFF+dist_grid.Nx, J_OFF+1:J_OFF+dist_grid.Ny, 1],
                            dist_grid.Nx, dist_grid.Ny, 1))
 Oceananigans.BoundaryConditions.fill_halo_regions!(local_bottom)
-grid = ImmersedBoundaryGrid(dist_grid, GridFittedBottom(local_bottom))
+grid = ImmersedBoundaryGrid(dist_grid, model_bottom(local_bottom))
+say("bottom: $(BOTTOM == "partial" ? "partial cells (minimum fraction $PARTIAL_MIN)" : "whole-cell steps"), vertical coordinate: $(ZSTAR ? "z-star" : "z")")
 say("ranks = $nranks (partition $PARTITION_X × $PARTITION_Y), local grid on rank 0: $(dist_grid.Nx) × $(dist_grid.Ny) × $Nz, threads/rank = $(Threads.nthreads())")
 
 # Check that each rank holds the right slab: a position-weighted sum of the bathymetry over all ranks must
