@@ -10,7 +10,7 @@ const SWP = Base.loaded_modules[only(id for id in keys(Base.loaded_modules) if i
 
 const GDIR = get(ENV, "MAB_DATA_DIR", joinpath(homedir(), "Data", "NumericalEarth"))
 const PREFIX = ENV["MAB_TAG"]
-const start_date = DateTime(2019, 4, 1)
+const start_date = DateTime(get(ENV, "MAB_START_DATE", "2019-04-01"))   # the run's start (its clock's zero)
 const eos = SWP.TEOS10.TEOS10EquationOfState()
 σ₀(T, S) = SWP.ρ(T, S, 0, eos) - 1000
 const g, ρ₀, Ω, Rₑ = 9.81, 1026.0, 7.292e-5, 6.371e6
