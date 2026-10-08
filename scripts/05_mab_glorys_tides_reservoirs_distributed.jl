@@ -914,7 +914,16 @@ if STAGE == "steps"
     oc = ocean.model
     nsteps = parse(Int, get(ENV, "MAB_STEPS", "10"))
     dumps = parse.(Int, split(get(ENV, "MAB_DUMP_STEPS", "0,1,2,5,10"), ","))
+    # MAB_DUMP_SYNC=true: wait for the halo exchanges in flight before writing, so the dumped halos are the filled ones
+    dump_sync = get(ENV, "MAB_DUMP_SYNC", "false") == "true"
     function dump_state(n)
+        if dump_sync
+            fs = oc.free_surface
+            for fld in (oc.velocities.u, oc.velocities.v, oc.tracers.T, oc.tracers.S, oc.tracers.e, fs.displacement,
+                        fs.barotropic_velocities.U, fs.barotropic_velocities.V)
+                Oceananigans.DistributedComputations.synchronize_communication!(fld)
+            end
+        end
         jldopen("$(TAG)_state$(n)_rank$(rank).jld2", "w") do f
             f["I_OFF"] = I_OFF; f["J_OFF"] = J_OFF
             f["u"] = Array(interior(oc.velocities.u)); f["v"] = Array(interior(oc.velocities.v)); f["w"] = Array(interior(oc.velocities.w))

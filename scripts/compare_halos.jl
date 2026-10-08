@@ -16,11 +16,11 @@ for n in steps
         r = jldopen(file, "r") do io; Dict(k => io[k] for k in keys(io)); end
         io_, jo = r["I_OFF"], r["J_OFF"]
         println("== step $n, ", basename(file), "  (offsets ", io_, ", ", jo, ")")
-        for name in ("eta", "U", "V", "u", "v", "T", "ao_x")
-            haskey(r, name * "_p") && haskey(single, name * "_p") || continue
+        names = [chop(k; tail = 2) for k in keys(r) if endswith(k, "_p") && haskey(single, k)]
+        for name in names
             A = single[name * "_p"]; HA = single[name * "_halo"]
             B = r[name * "_p"];      HB = r[name * "_halo"]
-            ref = name in ("U", "V", "ao_x") ? "eta" : name                # interior extent of this rank (centre count for 2D fields)
+            ref = haskey(r, name) ? name : "eta"                          # interior extent of this rank (centre count for 2D fields)
             nx = size(r[ref], 1)
             ny = size(r[ref], 2)
             worst = Dict{String, Any}(c => (0.0, ()) for c in ("own", "xhalo", "yhalo", "corner"))
@@ -34,7 +34,7 @@ for n in steps
                 cls = inx && iny ? "own" : (!inx && iny ? "xhalo" : (inx && !iny ? "yhalo" : "corner"))
                 d > worst[cls][1] && (worst[cls] = (d, (i, j, k, gi, gj)))
             end
-            @printf("  %-3s halo %s  ", name, string(Tuple(HB)))
+            @printf("  %-7s halo %s  ", name, string(Tuple(HB)))
             for cls in ("own", "xhalo", "yhalo", "corner")
                 d, at = worst[cls]
                 @printf("%s %.2e%s   ", cls, d, d > 0 ? " at local(i,j,k)=" * string(at[1:3]) * " global(i,j)=" * string(at[4:5]) : "")
