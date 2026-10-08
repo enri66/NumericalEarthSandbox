@@ -13,7 +13,7 @@
 # STEPS:          which steps to run (default all): surface,transects,fronts,argo_mld,argo_strat,moorings
 . /t0/workdir/enrique/julia_env.sh
 cd "$(dirname "$0")/.."
-: "${MAB_TAG:?set MAB_TAG to the run's path prefix}"
+: "${MAB_TAG:?set MAB_TAG to the path prefix of the run}"
 export MAB_TAG MAB_START_DATE=${MAB_START_DATE:-2019-08-29} MAB_DATA_DIR=${MAB_DATA_DIR:-/t0/workdir/enrique/Data/NumericalEarth}
 [ -n "$MAB_DAYS" ] && export MAB_DAYS
 export ARGO_DIR=${ARGO_DIR:-/t0/workdir/enrique/Data/Argo/mab} OOI_DIR=${OOI_DIR:-/t0/workdir/enrique/Data/OOI/pioneer}
