@@ -1240,10 +1240,15 @@ if get(ENV, "MAB_PROFILE_RUN", "false") == "true"
         time_step!(simulation)
     end
     t₀ = time_ns()
-    for _ in 1:nsteps
-        time_step!(simulation)
+    block = parse(Int, get(ENV, "MAB_PROFILE_BLOCK", string(nsteps)))
+    for b in 1:cld(nsteps, block)
+        stats = @timed for _ in 1:block
+            time_step!(simulation)
+        end
+        say(@sprintf("steps %4d-%4d: %.3f s per step, %.1f MB allocated per step, %.0f%% of the time in GC",
+                     (b - 1) * block + 1, b * block, stats.time / block, stats.bytes / block / 1e6, 100 * stats.gctime / stats.time))
     end
-    say(@sprintf("wall time per simulation step: %.3f s (mean of %d steps after %d warm-up steps)", (time_ns() - t₀) / 1e9 / nsteps, nsteps, warmup))
+    say(@sprintf("wall time per simulation step: %.3f s (mean of %d steps after %d warm-up steps)", (time_ns() - t₀) / 1e9 / (cld(nsteps, block) * block), cld(nsteps, block) * block, warmup))
     Profile.init(n = 10^8, delay = 0.005)
     Profile.@profile for _ in 1:nprofile
         time_step!(simulation)
