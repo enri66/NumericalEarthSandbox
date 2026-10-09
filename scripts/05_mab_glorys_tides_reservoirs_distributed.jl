@@ -834,10 +834,19 @@ isempty(CATKE_CHANGES) || say("CATKE parameter changes: " * join(["$k = $v" for 
 # for vertical advection, divergence and the kinetic-energy gradient) or "weno9" (order 9 for all four, less
 # dissipative; needs halos of at least 5, the grid has 7)
 const MOMENTUM_ADVECTION = get(ENV, "MAB_MOMENTUM_ADVECTION", "default")
-MOMENTUM_ADVECTION in ("default", "weno9") || error("MAB_MOMENTUM_ADVECTION must be default or weno9, got $MOMENTUM_ADVECTION")
+MOMENTUM_ADVECTION in ("default", "weno9", "explicit") ||
+    error("MAB_MOMENTUM_ADVECTION must be default, weno9 or explicit, got $MOMENTUM_ADVECTION")
 advection_kw = MOMENTUM_ADVECTION == "weno9" ?
-    (; momentum_advection = WENOVectorInvariant(order = 9, time_discretization = AdaptiveVerticallyImplicitDiscretization(cfl = 0.5))) : (;)
-MOMENTUM_ADVECTION == "default" || say("momentum advection: WENOVectorInvariant, order 9 throughout")
+    (; momentum_advection = WENOVectorInvariant(order = 9, time_discretization = AdaptiveVerticallyImplicitDiscretization(cfl = 0.5))) :
+               MOMENTUM_ADVECTION == "explicit" ? (; momentum_advection = WENOVectorInvariant()) : (;)
+MOMENTUM_ADVECTION == "default" || say("momentum advection: $(MOMENTUM_ADVECTION == "weno9" ? "WENOVectorInvariant, order 9 throughout" : "WENOVectorInvariant, vertical advection explicit")")
+# MAB_TRACER_ADVECTION: "default" (NumericalEarth's: WENO order 7, vertical advection adaptively implicit above a CFL of
+# 0.5), "weno7" or "weno5" (WENO of that order, vertical advection explicit)
+const TRACER_ADVECTION = get(ENV, "MAB_TRACER_ADVECTION", "default")
+TRACER_ADVECTION in ("default", "weno7", "weno5") || error("MAB_TRACER_ADVECTION must be default, weno7 or weno5, got $TRACER_ADVECTION")
+TRACER_ADVECTION == "default" ||
+    (advection_kw = merge(advection_kw, (; tracer_advection = WENO(order = TRACER_ADVECTION == "weno7" ? 7 : 5))))
+TRACER_ADVECTION == "default" || say("tracer advection: $TRACER_ADVECTION, vertical advection explicit")
 # Quadratic bottom drag coefficient (NumericalEarth's default 0.003, semi-implicit)
 const BOTTOM_DRAG = parse(Float64, get(ENV, "MAB_BOTTOM_DRAG", "0.003"))
 BOTTOM_DRAG == 0.003 || say("bottom drag coefficient Cᴰ = $BOTTOM_DRAG")
