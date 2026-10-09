@@ -1044,7 +1044,8 @@ function report_velocity_spike!(sim)
                 ua[iu], i, j, k, λf[i], φc[j], zc[k], prettytime(sim))
         # the whole column there: u and v at a few levels (k = 1 is the bottom cell, Nz the surface) and the depth mean
         # of u over the wet cells, to tell a depth-uniform (barotropic) flow from a bottom-intensified one
-        col, vcol = ua[iu.I[1], iu.I[2], :], va[iu.I[1], iu.I[2], :]
+        # u has one more point than v along x on the rank holding the east boundary face
+        col, vcol = ua[iu.I[1], iu.I[2], :], va[min(iu.I[1], size(va, 1)), iu.I[2], :]
         dz = diff(znodes(ggrid, Face())); wetk = findall(!iszero, col)
         levels = unique(clamp.([1, 2, 3, 5, 10, 20, 40, 60, 80, Nz], 1, Nz))
         @printf("    column at that cell: depth-mean u = %+.3f m/s over %d wet levels; u(k) %s; v(k) %s\n",
