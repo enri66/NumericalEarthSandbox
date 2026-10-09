@@ -1231,6 +1231,32 @@ simulation.output_writers[:checkpointer] = Checkpointer(model;
 say("running on $nranks ranks: tangential=$TANGENTIAL  Uᵉˣᵗ=$UEXT_MODE  τ_in=$(TAU_IN/86400) day(s)  " *
     "tides=$(join(TIDE_CONSTITUENTS, ",")) velocity=$VELOCITY_SCHEME$(VELOCITY_SCHEME == "oblique" ? "(τ_in=$(OBLIQUE_TAU_IN/days)d, τ_out=$(OBLIQUE_TAU_OUT/days)d, w=$PHASE_SPEED_WEIGHT)" : "") consistent_ubc=$CONSISTENT_UBC tracers=$TRACER_SCHEME reservoir(L_in=$RESERVOIR_L_IN, L_out=$RESERVOIR_L_OUT)  " *
     "$(sim_days) days  pickup=$PICKUP")
+# MAB_PROFILE_RUN=true: as MAB_STAGE=profile, but stepping the whole simulation (callbacks and output writers included)
+if get(ENV, "MAB_PROFILE_RUN", "false") == "true"
+    warmup = parse(Int, get(ENV, "MAB_WARMUP", "3"))
+    nsteps = parse(Int, get(ENV, "MAB_STEPS", "10"))
+    nprofile = parse(Int, get(ENV, "MAB_PROFILE_STEPS", "5"))
+    for _ in 1:warmup
+        time_step!(simulation)
+    end
+    t₀ = time_ns()
+    for _ in 1:nsteps
+        time_step!(simulation)
+    end
+    say(@sprintf("wall time per simulation step: %.3f s (mean of %d steps after %d warm-up steps)", (time_ns() - t₀) / 1e9 / nsteps, nsteps, warmup))
+    Profile.init(n = 10^8, delay = 0.005)
+    Profile.@profile for _ in 1:nprofile
+        time_step!(simulation)
+    end
+    if rank == 0
+        open("$(TAG)_profile_run_rank0.txt", "w") do io
+            Profile.print(IOContext(io, :displaysize => (100000, 400)); format = :flat, sortedby = :count, mincount = 10)
+        end
+    end
+    say("profiled $nprofile simulation steps (MAB_PROFILE_RUN)")
+    exit(0)
+end
+
 run!(simulation; pickup = PICKUP, checkpoint_at_end = true)
 isempty(MOORINGS) || save_moorings()
 say("\n✅ done — $(TAG)")
