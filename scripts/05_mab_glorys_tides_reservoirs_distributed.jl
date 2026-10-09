@@ -482,27 +482,34 @@ end
     return ramp * U, ramp * η
 end
 
+# With z-star the barotropic transport spans the whole column H + η, so the subtidal GLORYS transport (its depth-mean
+# velocity times the resting depth H) is stretched by (H + η)/H with GLORYS's η; the tidal transport is a whole-column
+# transport already. H is the model's resting depth at the boundary point.
+const H_west  = [min(-bh[1, j], Z_BOTTOM) for j in 1:Nφ];   const H_east  = [min(-bh[end, j], Z_BOTTOM) for j in 1:Nφ]
+const H_south = [min(-bh[i, 1], Z_BOTTOM) for i in 1:Nλ];   const H_north = [min(-bh[i, end], Z_BOTTOM) for i in 1:Nλ]
+@inline column_stretching(H, η) = ZSTAR && H > 0 ? (H + η) / H : 1.0
+
 # The `*_g` functions take the WHOLE-DOMAIN index s along the boundary (j for west/east, i for south/north); the
 # functions the model calls receive this rank's LOCAL index, so they add the rank's offset first.
 function U_west_g(j, k, grid, clock, f)
     Us, ηsub = lerp_slab(tU, U_lo, j, clock.time), lerp_slab(tU, η_w, j, clock.time)
     Ut, ηt = tidal_UV_eta(west_U_const, west_η_const, harmonics, clock.time, j)
-    return (Us + Ut, ηsub + ηt)
+    return (Us * column_stretching(H_west[j], ηsub) + Ut, ηsub + ηt)
 end
 function U_east_g(j, k, grid, clock, f)
     Us, ηsub = lerp_slab(tU, U_hi, j, clock.time), lerp_slab(tU, η_e, j, clock.time)
     Ut, ηt = tidal_UV_eta(east_U_const, east_η_const, harmonics, clock.time, j)
-    return (Us + Ut, ηsub + ηt)
+    return (Us * column_stretching(H_east[j], ηsub) + Ut, ηsub + ηt)
 end
 function V_south_g(i, k, grid, clock, f)
     Vs, ηsub = lerp_slab(tV, V_lo, i, clock.time), lerp_slab(tV, η_s, i, clock.time)
     Vt, ηt = tidal_UV_eta(south_V_const, south_η_const, harmonics, clock.time, i)
-    return (Vs + Vt, ηsub + ηt)
+    return (Vs * column_stretching(H_south[i], ηsub) + Vt, ηsub + ηt)
 end
 function V_north_g(i, k, grid, clock, f)
     Vs, ηsub = lerp_slab(tV, V_hi, i, clock.time), lerp_slab(tV, η_n, i, clock.time)
     Vt, ηt = tidal_UV_eta(north_V_const, north_η_const, harmonics, clock.time, i)
-    return (Vs + Vt, ηsub + ηt)
+    return (Vs * column_stretching(H_north[i], ηsub) + Vt, ηsub + ηt)
 end
 U_west(j, k, grid, clock, f)  = U_west_g(j + J_OFF, k, grid, clock, f)
 U_east(j, k, grid, clock, f)  = U_east_g(j + J_OFF, k, grid, clock, f)
@@ -523,10 +530,28 @@ struct ConsistentNormalFlow{B, U, T}
     Utotal :: U   # (s, k, grid, clock, fields) -> (barotropic transport, η), whole-domain index s (the `*_g` functions)
     table  :: T   # times, depth integral of the interpolated profile per time and boundary point, wet depth, floor
     off    :: Int # this rank's offset along the boundary: local index + off = whole-domain index
+    dim    :: Int # the boundary's normal direction (1: west/east, 2: south/north), set when regularized
+    right  :: Bool # east or north
 end
 
+ConsistentNormalFlow(base, Utotal, table, off) = ConsistentNormalFlow(base, Utotal, table, off, 0, false)
+
 regularize_boundary_condition(c::ConsistentNormalFlow, grid, loc, dim, Side, args...) =
-    ConsistentNormalFlow(regularize_boundary_condition(c.base, grid, loc, dim, Side, args...), c.Utotal, c.table, c.off)
+    ConsistentNormalFlow(regularize_boundary_condition(c.base, grid, loc, dim, Side, args...), c.Utotal, c.table, c.off,
+                         dim, Side === Oceananigans.BoundaryConditions.RightBoundary)
+
+# The vertical stretching of the boundary face's column: (H + η) / H with z-star, 1 on a static grid. The table's depth
+# integrals use the static cell heights, so the target transport is divided by it, and the stretched cells integrate the
+# boundary velocity to the target exactly.
+@inline function boundary_stretching(c::ConsistentNormalFlow, s, k, grid)
+    if c.dim == 1
+        i = c.right ? grid.Nx + 1 : 1
+        return Oceananigans.Operators.σⁿ(i, s, k, grid, Face(), Center(), Center())
+    else
+        j = c.right ? grid.Ny + 1 : 1
+        return Oceananigans.Operators.σⁿ(s, j, k, grid, Center(), Face(), Center())
+    end
+end
 
 @inline function getbc(c::ConsistentNormalFlow, s::Integer, k::Integer, grid::Oceananigans.Grids.AbstractGrid, clock = nothing, args...)
     u = getbc(c.base, s, k, grid, clock, args...)
@@ -537,7 +562,7 @@ regularize_boundary_condition(c::ConsistentNormalFlow, grid, loc, dim, Side, arg
     t = isnothing(clock) ? 0.0 : clock.time
     n1, n2, w = frame(tb.times, t)
     Uint = (1 - w) * tb.Uint[n1, sg] + w * tb.Uint[n2, sg]
-    return u + (c.Utotal(sg, k, grid, (; time = t), nothing)[1] - Uint) / tb.Hwet[sg]
+    return u + (c.Utotal(sg, k, grid, (; time = t), nothing)[1] / boundary_stretching(c, s, k, grid) - Uint) / tb.Hwet[sg]
 end
 
 function make_consistency_table(floor_line)
