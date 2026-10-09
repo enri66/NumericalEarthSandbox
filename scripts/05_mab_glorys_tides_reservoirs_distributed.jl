@@ -982,6 +982,34 @@ if STAGE == "steps"
     exit(0)
 end
 
+# MAB_STAGE=profile: after MAB_WARMUP steps, time MAB_STEPS steps, then sample MAB_PROFILE_STEPS more with the profiler;
+# rank 0 writes the samples as a flat list, by count, to <tag>_profile_rank0.txt
+if STAGE == "profile"
+    using Profile
+    warmup = parse(Int, get(ENV, "MAB_WARMUP", "3"))
+    nsteps = parse(Int, get(ENV, "MAB_STEPS", "10"))
+    nprofile = parse(Int, get(ENV, "MAB_PROFILE_STEPS", "5"))
+    for _ in 1:warmup
+        time_step!(model, Δt_baroclinic)
+    end
+    t₀ = time_ns()
+    for _ in 1:nsteps
+        time_step!(model, Δt_baroclinic)
+    end
+    say(@sprintf("wall time per step: %.3f s (mean of %d steps after %d warm-up steps)", (time_ns() - t₀) / 1e9 / nsteps, nsteps, warmup))
+    Profile.init(n = 10^8, delay = 0.005)
+    Profile.@profile for _ in 1:nprofile
+        time_step!(model, Δt_baroclinic)
+    end
+    if rank == 0
+        open("$(TAG)_profile_rank0.txt", "w") do io
+            Profile.print(IOContext(io, :displaysize => (100000, 400)); format = :flat, sortedby = :count, mincount = 10)
+        end
+    end
+    say("profiled $nprofile steps (MAB_STAGE=profile)")
+    exit(0)
+end
+
 wall = Ref(time())
 function progress(sim)
     u, v, w = sim.model.ocean.model.velocities
