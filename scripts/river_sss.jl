@@ -42,5 +42,5 @@ for (r, name) in enumerate(names[2:end])
     hm = heatmap!(ax, λ, φ, SSS[r + 1] .- SSS[1]; colormap = :balance, colorrange = (-2, 2), nan_color = :gray85)
     Colorbar(fig[2, r + 1], hm; vertical = false, flipaxis = false)
 end
-out = joinpath(dirname(RUNS[1]), @sprintf("river_sss_day%02d.png", round(Int, d)))
+out = joinpath(dirname(RUNS[1]), @sprintf("river_sss_%s_day%02d.png", names[end], round(Int, d)))
 save(out, fig; px_per_unit = 1.2); println("saved ", out)
