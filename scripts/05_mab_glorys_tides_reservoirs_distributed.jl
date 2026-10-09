@@ -53,6 +53,7 @@ end
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: ExponentialDiscretization, MutableVerticalDiscretization, znodes, λnodes, φnodes
+using Profile    # MAB_STAGE=profile
 using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities: CATKEMixingLength, CATKEEquation
 using Oceananigans.BoundaryConditions: PerturbationAdvection, NormalRadiation, ObliqueRadiation, TracerReservoir,
                                        GravityWaveRadiationBoundaryCondition,
@@ -985,7 +986,6 @@ end
 # MAB_STAGE=profile: after MAB_WARMUP steps, time MAB_STEPS steps, then sample MAB_PROFILE_STEPS more with the profiler;
 # rank 0 writes the samples as a flat list, by count, to <tag>_profile_rank0.txt
 if STAGE == "profile"
-    using Profile
     warmup = parse(Int, get(ENV, "MAB_WARMUP", "3"))
     nsteps = parse(Int, get(ENV, "MAB_STEPS", "10"))
     nprofile = parse(Int, get(ENV, "MAB_PROFILE_STEPS", "5"))
