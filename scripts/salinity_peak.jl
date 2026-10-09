@@ -47,10 +47,11 @@ zc = collect(znodes(ug, Center()))
 println("\nfull-depth salinity maximum, de-tided daily frames:")
 for n in eachindex(SV.times)
     s = Array(interior(SV[n]))
-    for i in 1:Nx, j in 1:Ny, k in axes(s, 3)
-        (wet[i, j] && zc[k] > bh[i, j]) || (s[i, j, k] = NaN)
-    end
+    # every active cell, the bottom cells of a partial-cell grid included (their centres can lie below the bottom height);
+    # inactive cells hold zero
+    s[s .== 0] .= NaN
     c = argmax(replace(s, NaN => -Inf)); i, j, k = c.I
-    @printf("  day %4.1f  %.2f psu at k = %d (z = %.0f m) of %s; cells above %.1f psu: %d\n", SV.times[n] / 86400, s[c], k, zc[k],
-            describe(i, j), SMAX, count(x -> isfinite(x) && x > SMAX, s))
+    kb = findfirst(x -> isfinite(x), s[i, j, :])
+    @printf("  day %4.1f  %.2f psu at k = %d (z = %.0f m; bottom cell k = %s) of %s; cells above %.1f psu: %d\n", SV.times[n] / 86400,
+            s[c], k, zc[k], string(kb), describe(i, j), SMAX, count(x -> isfinite(x) && x > SMAX, s))
 end
