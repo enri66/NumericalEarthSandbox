@@ -39,3 +39,18 @@ for (i, j) in sort(hot; by = c -> -last[c...])[1:min(end, 15)]
     @printf("  %.2f psu at %s%s\n", last[i, j], describe(i, j),
             isnothing(Sref) ? "" : @sprintf("; %s: %.2f psu", basename(REFERENCE), Sref[i, j]))
 end
+
+# Full depth, from the de-tided daily output
+volume = PREFIX * "_volume_daily.jld2"
+SV = open_series(volume, "S"; backend = OnDisk())
+zc = collect(znodes(ug, Center()))
+println("\nfull-depth salinity maximum, de-tided daily frames:")
+for n in eachindex(SV.times)
+    s = Array(interior(SV[n]))
+    for i in 1:Nx, j in 1:Ny, k in axes(s, 3)
+        (wet[i, j] && zc[k] > bh[i, j]) || (s[i, j, k] = NaN)
+    end
+    c = argmax(replace(s, NaN => -Inf)); i, j, k = c.I
+    @printf("  day %4.1f  %.2f psu at k = %d (z = %.0f m) of %s; cells above %.1f psu: %d\n", SV.times[n] / 86400, s[c], k, zc[k],
+            describe(i, j), SMAX, count(x -> isfinite(x) && x > SMAX, s))
+end
