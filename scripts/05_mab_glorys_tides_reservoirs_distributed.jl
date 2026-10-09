@@ -829,6 +829,13 @@ function catke_closure(changes)
 end
 
 closure_kw = isempty(CATKE_CHANGES) ? (;) : (; closure = catke_closure(CATKE_CHANGES))
+# MAB_CLOSURE: "catke" (default), "constant" (vertical diffusivity 1e-5 m²/s and viscosity 1e-4 m²/s, implicit) or "ri"
+# (RiBasedVerticalDiffusivity) in place of CATKE, to test the closure's part in a result
+const CLOSURE = get(ENV, "MAB_CLOSURE", "catke")
+CLOSURE in ("catke", "constant", "ri") || error("MAB_CLOSURE must be catke, constant or ri, got $CLOSURE")
+CLOSURE == "constant" && (closure_kw = (; closure = VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ = 1e-5, ν = 1e-4)))
+CLOSURE == "ri" && (closure_kw = (; closure = RiBasedVerticalDiffusivity()))
+CLOSURE == "catke" || say("closure: $CLOSURE in place of CATKE")
 isempty(CATKE_CHANGES) || say("CATKE parameter changes: " * join(["$k = $v" for (k, v) in CATKE_CHANGES], ", "))
 # Momentum advection: "default" (NumericalEarth's WENOVectorInvariant: WENO order 9 for the vorticity flux, order 5
 # for vertical advection, divergence and the kinetic-energy gradient) or "weno9" (order 9 for all four, less
@@ -843,9 +850,10 @@ MOMENTUM_ADVECTION == "default" || say("momentum advection: $(MOMENTUM_ADVECTION
 # MAB_TRACER_ADVECTION: "default" (NumericalEarth's: WENO order 7, vertical advection adaptively implicit above a CFL of
 # 0.5), "weno7" or "weno5" (WENO of that order, vertical advection explicit)
 const TRACER_ADVECTION = get(ENV, "MAB_TRACER_ADVECTION", "default")
-TRACER_ADVECTION in ("default", "weno7", "weno5") || error("MAB_TRACER_ADVECTION must be default, weno7 or weno5, got $TRACER_ADVECTION")
-TRACER_ADVECTION == "default" ||
-    (advection_kw = merge(advection_kw, (; tracer_advection = WENO(order = TRACER_ADVECTION == "weno7" ? 7 : 5))))
+TRACER_ADVECTION in ("default", "weno7", "weno5", "upwind1") ||
+    error("MAB_TRACER_ADVECTION must be default, weno7, weno5 or upwind1, got $TRACER_ADVECTION")
+tracer_scheme = TRACER_ADVECTION == "weno7" ? WENO(order = 7) : TRACER_ADVECTION == "weno5" ? WENO(order = 5) : UpwindBiased(order = 1)
+TRACER_ADVECTION == "default" || (advection_kw = merge(advection_kw, (; tracer_advection = tracer_scheme)))
 TRACER_ADVECTION == "default" || say("tracer advection: $TRACER_ADVECTION, vertical advection explicit")
 # Quadratic bottom drag coefficient (NumericalEarth's default 0.003, semi-implicit)
 const BOTTOM_DRAG = parse(Float64, get(ENV, "MAB_BOTTOM_DRAG", "0.003"))
