@@ -42,6 +42,8 @@ function localize_routing(routing, i_offset, j_offset, nx, ny, arch)
                         on_architecture(arch, target_i), on_architecture(arch, target_j), on_architecture(arch, offsets))
 end
 
+const RIVER_MOUTHS = Ref(NamedTuple{(:λ, :φ, :Q), Tuple{Float64, Float64, Float64}}[])
+
 function glofas_land_with_mouths(grid; extra_mouths = MAB_EXTRA_MOUTHS, dataset = GloFASReanalysis(), start_date, end_date, dir, region,
                                  time_indices_in_memory = 10, time_indexing = Oceananigans.OutputReaders.Cyclical(),
                                  freshwater_density = 1000, maximum_search_radius = 5, spread_radius = 1.2, maximum_spread_cells = 8, say = println,
@@ -66,6 +68,9 @@ function glofas_land_with_mouths(grid; extra_mouths = MAB_EXTRA_MOUTHS, dataset 
         say(@sprintf("rivers: added %s, GloFAS cell %.3f°E %.3f°N (%.0f m³/s on the first day) delivered at %.3f°E %.3f°N",
                      m.name, gλ[i], gφ[j], q, m.mouth_λ, m.mouth_φ))
     end
+
+    # the mouths' delivery points and first-day discharge (m³/s), for masks built around them (e.g. MAB_SSS_RIVER_MASK)
+    RIVER_MOUTHS[] = [(λ = outlet_λ[n], φ = outlet_φ[n], Q = snapshot[outlet_i[n], outlet_j[n], 1]) for n in eachindex(outlet_i)]
 
     outlet_weight = fill(convert(eltype(grid), freshwater_density), length(outlet_i))
     # `routing_grid` is the grid the mouths are routed onto: `grid` itself, or on a distributed run the whole-domain grid on

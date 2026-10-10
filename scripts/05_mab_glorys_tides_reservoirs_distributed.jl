@@ -766,10 +766,11 @@ isempty(SPONGE_VARS) || say(@sprintf("GLORYS sponge on %s: %d cells, τ = %.2f d
 # ---------------- surface salinity restoring toward GLORYS (MAB_SSS_PISTON) ----------------
 # A surface salt flux J = -w (Sᴳ - S) on the top cell, with w the piston velocity, added to the bulk-formula fluxes.
 # GLORYS salinity is interpolated onto the model's top cells once per GLORYS frame, before the run.
-struct SurfaceSalinityRestoring{A, T}
+struct SurfaceSalinityRestoring{A, T, M}
     target :: A
     times  :: T
     piston :: Float64
+    mask   :: M   # whole-domain factor on the piston velocity, 1 by default (see MAB_SSS_RIVER_MASK)
 end
 
 function SurfaceSalinityRestoring(fts, piston)
@@ -783,7 +784,7 @@ function SurfaceSalinityRestoring(fts, piston)
             target[i, j, n] = Oceananigans.Fields.interpolate(X, frame_field, loc, fts.grid)
         end
     end
-    return SurfaceSalinityRestoring(target, times, piston)
+    return SurfaceSalinityRestoring(target, times, piston, ones(Nλ, Nφ))
 end
 
 @inline function getbc(r::SurfaceSalinityRestoring, i::Integer, j::Integer, grid::Oceananigans.Grids.AbstractGrid, clock, fields)
@@ -791,7 +792,7 @@ end
     cj = clamp(j + J_OFF, 1, size(r.target, 2))
     n₁, n₂, w = frame(r.times, clock.time)
     Sᴳ = @inbounds (1 - w) * r.target[ci, cj, n₁] + w * r.target[ci, cj, n₂]
-    return @inbounds - r.piston * (Sᴳ - fields.S[i, j, grid.Nz])
+    return @inbounds - r.piston * r.mask[ci, cj] * (Sᴳ - fields.S[i, j, grid.Nz])
 end
 
 sss_restoring = SSS_PISTON > 0 ? SurfaceSalinityRestoring(fts_S, SSS_PISTON) : nothing
@@ -871,17 +872,36 @@ const RIVER_MIXING_DEPTH = parse(Float64, get(ENV, "MAB_RIVER_MIXING_DEPTH", "10
 # MAB_RIVER_EXTRA (default true) adds the Hudson and the Delaware by hand: GloFAS's automatic mouth detection misses them
 # (see glofas_land.jl)
 const RIVER_EXTRA = get(ENV, "MAB_RIVER_EXTRA", "true") == "true"
-RIVERS && include(joinpath(@__DIR__, "glofas_land.jl"))
+# MAB_SSS_RIVER_MASK="r_in,r_out" (km; with surface salinity restoring, rivers on or off): no restoring within r_in of a river mouth
+# carrying at least MAB_SSS_RIVER_QMIN m³/s on the first day, full restoring beyond r_out, a cos² ramp between, so that the
+# plumes are not restored away while the restoring still holds the open shelf, the slope and the deep water
+const SSS_RIVER_MASK = parse.(Float64, filter(!isempty, split(get(ENV, "MAB_SSS_RIVER_MASK", ""), ",")))
+const SSS_RIVER_QMIN = parse(Float64, get(ENV, "MAB_SSS_RIVER_QMIN", "20"))
+const MASK_SSS = length(SSS_RIVER_MASK) == 2
+(RIVERS || MASK_SSS) && include(joinpath(@__DIR__, "glofas_land.jl"))
 # How far, in model cells, a mouth may be from the wet cell that receives it (NumericalEarth's 5 cells is 0.4 degree at
 # 1/12 degree), and over how many wet cells nearest the mouth each river's discharge is split equally (NumericalEarth's 8
 # is tuned for 1/12 degree). Both scale with CELLS_PER_DEGREE / 12 by default, so the footprint keeps its size in km.
 const RIVER_SEARCH_CELLS = parse(Int, get(ENV, "MAB_RIVER_SEARCH_CELLS", string(round(Int, 5 * CELLS_PER_DEGREE / 12))))
 const RIVER_SPREAD_CELLS = parse(Int, get(ENV, "MAB_RIVER_SPREAD_CELLS", string(round(Int, 8 * CELLS_PER_DEGREE / 12))))
-land = RIVERS ? glofas_land_with_mouths(grid; extra_mouths = RIVER_EXTRA ? MAB_EXTRA_MOUTHS : [], start_date, end_date = stop_date,
+land = RIVERS || MASK_SSS ? glofas_land_with_mouths(grid; extra_mouths = RIVER_EXTRA ? MAB_EXTRA_MOUTHS : [], start_date, end_date = stop_date,
                                         dir = joinpath(DATA_DIR, "glofas"), region = BoundingBox(longitude = data_λ, latitude = data_φ),
                                         maximum_spread_cells = RIVER_SPREAD_CELLS, maximum_search_radius = RIVER_SEARCH_CELLS, say,
                                         routing_grid = ggrid, block = (I_OFF, J_OFF, dist_grid.Nx, dist_grid.Ny)) : nothing
 RIVERS && say("rivers: GloFAS discharge, each river split over $RIVER_SPREAD_CELLS cells, routed onto the coast, river-mouth mixing over the top $(RIVER_MIXING_DEPTH) m")
+
+if MASK_SSS && !isnothing(sss_restoring)
+    r_in, r_out = SSS_RIVER_MASK
+    mouths = filter(m -> m.Q ≥ SSS_RIVER_QMIN, RIVER_MOUTHS[])
+    λm, φm = λnodes(ggrid, Center()), φnodes(ggrid, Center())
+    haversine(λ₁, φ₁, λ₂, φ₂) = 2 * 6371 * asin(sqrt(sind((φ₂ - φ₁) / 2)^2 + cosd(φ₁) * cosd(φ₂) * sind((λ₂ - λ₁) / 2)^2))
+    for j in 1:Nφ, i in 1:Nλ
+        d = minimum(m -> haversine(λm[i], φm[j], m.λ, m.φ), mouths; init = Inf)
+        sss_restoring.mask[i, j] = d ≤ r_in ? 0.0 : d ≥ r_out ? 1.0 : sin(π / 2 * (d - r_in) / (r_out - r_in))^2
+    end
+    say(@sprintf("surface salinity restoring off within %.0f km of %d river mouths (Q ≥ %.0f m³/s), full beyond %.0f km; %d surface cells reduced",
+                 r_in, length(mouths), SSS_RIVER_QMIN, r_out, count(<(1), sss_restoring.mask)))
+end
 river_kw = RIVERS ? (; river_routing = land.river_routing, river_mouth_mixing_depth = RIVER_MIXING_DEPTH) : (;)
 ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw..., advection_kw...,
                          river_kw..., bottom_drag_coefficient = BOTTOM_DRAG, implicit_bottom_drag = IMPLICIT_DRAG)
