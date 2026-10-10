@@ -47,7 +47,7 @@ using NumericalEarth.DataWrangling: Metadata, MetadataSet, BoundingBox
 using NumericalEarth.NestedModels: Interpolated
 using CopernicusMarine              # activates the GLORYS download backend
 using CopernicusClimateDataStore    # activates the ERA5 download backend
-if get(ENV, "MAB_RIVERS", "false") == "true"
+if get(ENV, "MAB_RIVERS", "false") == "true" || !isempty(get(ENV, "MAB_SSS_RIVER_MASK", ""))
     using CDSAPI                    # activates the GloFAS backend (its `download` also returns files already on disk)
 end
 using Oceananigans
