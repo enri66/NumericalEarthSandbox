@@ -965,7 +965,8 @@ atmosphere = ERA5PrescribedAtmosphere(; start_date, end_date = stop_date, region
                                       dir = joinpath(DATA_DIR, "era5"), ERA5_KW...)
 radiation  = ERA5PrescribedRadiation(;  start_date, end_date = stop_date, region,
                                       dir = joinpath(DATA_DIR, "era5"), ERA5_KW...)
-model = OceanOnlyModel(ocean; atmosphere, radiation, land)
+# the river discharge reaches the ocean only with MAB_RIVERS (the land is also built for MAB_SSS_RIVER_MASK's mouth positions)
+model = OceanOnlyModel(ocean; atmosphere, radiation, land = RIVERS ? land : nothing)
 simulation = Simulation(model; Δt = Δt_baroclinic, stop_time = sim_days * days, stop_iteration = STOP_ITERATION)
 
 # MAB_STAGE=model: everything is built and initialised; report the initial state and stop before time stepping.
