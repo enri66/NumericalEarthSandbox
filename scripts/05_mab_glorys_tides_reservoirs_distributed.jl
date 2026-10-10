@@ -856,6 +856,15 @@ TRACER_ADVECTION in ("default", "weno7", "weno5", "upwind1") ||
 tracer_scheme = TRACER_ADVECTION == "weno7" ? WENO(order = 7) : TRACER_ADVECTION == "weno5" ? WENO(order = 5) : UpwindBiased(order = 1)
 TRACER_ADVECTION == "default" || (advection_kw = merge(advection_kw, (; tracer_advection = tracer_scheme)))
 TRACER_ADVECTION == "default" || say("tracer advection: $TRACER_ADVECTION, vertical advection explicit")
+# MAB_TRACER_BOUNDS="T:-2:31,S:0:37.2": WENO order 7 with the bounds-preserving (Zhang-Shu) limiter for those tracers,
+# keeping each within its interval; other tracers keep the scheme chosen above
+const TRACER_BOUNDS = [(Symbol(a), parse(Float64, b), parse(Float64, c)) for (a, b, c) in
+                       split.(filter(!isempty, split(get(ENV, "MAB_TRACER_BOUNDS", ""), ",")), ":")]
+if !isempty(TRACER_BOUNDS)
+    bounded = NamedTuple(name => WENO(order = 7, bounds = (lo, hi)) for (name, lo, hi) in TRACER_BOUNDS)
+    advection_kw = merge(advection_kw, (; tracer_advection = bounded))
+    say("tracer advection: bounds-preserving WENO-7 for " * join(["$name in [$lo, $hi]" for (name, lo, hi) in TRACER_BOUNDS], ", "))
+end
 # Quadratic bottom drag coefficient (NumericalEarth's default 0.003, semi-implicit)
 const BOTTOM_DRAG = parse(Float64, get(ENV, "MAB_BOTTOM_DRAG", "0.003"))
 BOTTOM_DRAG == 0.003 || say("bottom drag coefficient Cᴰ = $BOTTOM_DRAG")
