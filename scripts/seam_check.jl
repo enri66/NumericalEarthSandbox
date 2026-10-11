@@ -67,6 +67,7 @@ end
 # above MAB_STREAK_K times the field's median there, and what u, v and T do at the same points
 const LEN = parse(Int, get(ENV, "MAB_STREAK_LEN", "8"))
 const K = parse(Float64, get(ENV, "MAB_STREAK_K", "8"))
+const HMIN = parse(Float64, get(ENV, "MAB_STREAK_HMIN", "0"))      # only points deeper than this (m)
 d2x(A, i, j) = abs(A[i+1, j] - 2A[i, j] + A[i-1, j])
 d2y(A, i, j) = abs(A[i, j+1] - 2A[i, j] + A[i, j-1])
 Uc = U[1:Nx, :]; Vc = V[:, 1:Ny]; Tn = T[:, :, n]
@@ -75,7 +76,7 @@ streaks = []
 for i in 3:Nx-1
     run = Int[]
     for j in 2:Ny
-        hot = all(isfinite, (Ro[i-1, j], Ro[i, j], Ro[i+1, j])) && d2x(Ro, i, j) > K * med
+        hot = all(isfinite, (Ro[i-1, j], Ro[i, j], Ro[i+1, j])) && -B[i, j, 1] > HMIN && d2x(Ro, i, j) > K * med
         if hot
             push!(run, j)
         else
@@ -91,7 +92,7 @@ for (i, j1, j2) in sort(streaks; by = s -> -(s[3] - s[2]))[1:min(end, 15)]
     js = j1:j2
     ru = mean(d2x(Uc, i, j) for j in js) / median(filter(isfinite, [d2x(Uc, a, b) for a in 2:Nx-1, b in js]))
     rv = mean(d2x(Vc, i, j) for j in js) / median(filter(isfinite, [d2x(Vc, a, b) for a in 2:Nx-1, b in js]))
-    rt = mean(d2x(Tn, i, j) for j in js if wet[i-1, j] & wet[i, j] & wet[i+1, j]; init = NaN) / median(filter(isfinite, [d2x(Tn, a, b) for a in 2:Nx-1, b in js]))
+    rt = mean([d2x(Tn, i, j) for j in js if wet[i-1, j] & wet[i, j] & wet[i+1, j]]) / median(filter(isfinite, [d2x(Tn, a, b) for a in 2:Nx-1, b in js]))
     @printf("  column %3d (%.3f°E, rank column %d, %s) rows %3d-%3d (%.2f-%.2f°N): across-x jump vs median: u %.1f×, v %.1f×, T %.1f×; depth %.0f m\n",
             i, λc[i], (i - 1) ÷ (Nx ÷ px) + 1, (i in xedges || i - 1 in xedges) ? "RANK EDGE" : "interior", j1, j2, φc[j1], φc[j2], ru, rv, rt, -B[i, (j1 + j2) ÷ 2, 1])
 end
