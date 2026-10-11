@@ -18,14 +18,12 @@ simulation. Analysis: `scripts/analysis_package.sh` (surface, MLD/thermocline se
 | tracer advection | `MAB_TRACER_BOUNDS=T:-2:31,S:0:37.2` | bounds-preserving WENO-7 (Zhang-Shu limiter) for T and S: removed the bottom-cell overshoot over 30 days in the production configuration (b12_pzb: hot cell 34.4 psu / 13.4 °C vs 38.8 / 21.2 unbounded; GLORYS 34.9 / 13.7), negligible cost |
 | rivers | `MAB_RIVERS=true` (`mpi05_rivers` env) | GloFAS daily discharge, hand-placed Hudson and Delaware mouths |
 | surface salinity restoring | `MAB_SSS_PISTON=0.5` (m/day) toward GLORYS | holds the shelf, slope and deep salinity |
-| restoring near rivers | `MAB_SSS_RIVER_MASK=30,100` (km), `MAB_SSS_RIVER_QMIN=20` (m³/s) | no restoring within 30 km of mouths with ≥ 20 m³/s, full beyond 100 km: uniform restoring weakened the plumes by 20–30 %, the masked plume equals the unrestored one near the mouths |
+| restoring near rivers | `MAB_SSS_RIVER_MASK=30,100` (km), `MAB_SSS_RIVER_QMIN=20` (m³/s) | no restoring within 30 km of mouths with ≥ 20 m³/s, full beyond 100 km: uniform restoring weakened the plumes by 20–30 %, the masked plume equals the unrestored one (Hudson −4.91 psu, 51 cells > 1 psu fresher, vs −3.59 and 39 uniform), and the masked no-river control stays within ±0.004 psu of the uniform one on the shelf, slope and deep water (no drift) |
 | river-mouth mixing | default (0.1 m²/s over the top 10 m) | keeps a plume in one surface cell from driving the salinity to zero |
 | triton24 nodes | `sbatch --exclude=node[38-41]` | node38's socket-0 memory runs at ~1/45 of normal bandwidth; 39–41 not yet diagnosed (`runs/NODES_README.txt`) |
 
 ## Open items
 
-- **Masked-restoring check:** the corrected no-river control `sr_ctl_msk2` should confirm that the shelf salinity
-  away from the mouths does not drift where the restoring is weaker; if it does, reduce the outer radius.
 - **Mask radii by season:** 30/100 km suits September's small plumes; for spring freshets (Hudson plume 100+ km
   along the New Jersey coast) widen the mask, e.g. 50/150 km, or scale it with discharge.
 - **High-discharge test:** September discharge is low (Hudson ~250 m³/s), so it cannot discriminate between river
