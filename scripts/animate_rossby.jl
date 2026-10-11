@@ -49,11 +49,14 @@ Ro = @lift rossby(frames[$k])
 title = @lift @sprintf("%s  surface Rossby number ζ/f  %s (day %.2f)", basename(PREFIX),
                        Dates.format(start_date + Second(round(Int, times[frames[$k]])), "yyyy-mm-dd HH:MM"), times[frames[$k]] / 86400)
 
-fig = Figure(size = (1500, 1080), fontsize = 18)
-Label(fig[0, 1], title, fontsize = 22)
+# the figure takes the map's shape (degrees of longitude shortened by cos φ), with the colour bar at the side
+aspect = (λf[end] - λf[1]) * cosd((φf[1] + φf[end]) / 2) / (φf[end] - φf[1])
+fig = Figure(size = (round(Int, 1000 * aspect) + 220, 1100), fontsize = 18)
+Label(fig[0, 1:2], title, fontsize = 22)
 ax = Axis(fig[1, 1], aspect = DataAspect())
 hm = heatmap!(ax, λf[2:Nx], φf[2:Ny], Ro; colormap = :balance, colorrange = (-RO_MAX, RO_MAX), nan_color = :gray80)
-Colorbar(fig[2, 1], hm; vertical = false, flipaxis = false, label = "ζ / f")
+Colorbar(fig[1, 2], hm; label = "ζ / f")
+resize_to_layout!(fig)
 
 out = PREFIX * "_rossby_raw.mp4"
 record(fig, out, eachindex(frames); framerate = FPS) do i
