@@ -15,7 +15,7 @@ simulation. Analysis: `scripts/analysis_package.sh` (surface, MLD/thermocline se
 | vertical coordinate | `MAB_ZSTAR=true` | freshwater adds volume; improved the slope/deep MLD bias in the 1/12° tests |
 | bottom | `MAB_BOTTOM=partial` | partial bottom cells (cost about 1.2× per step) |
 | open boundaries with z* | fixed boundary treatment (sandbox 73a0081) | GLORYS transport and the consistent normal velocity account for the z* stretching |
-| tracer advection | `MAB_TRACER_ADVECTION=weno7` | harmless; it does **not** fix the bottom-cell overshoot (see below) |
+| tracer advection | `MAB_TRACER_BOUNDS=T:-2:31,S:0:37.2` | bounds-preserving WENO-7 (Zhang-Shu limiter) for T and S: removed the bottom-cell overshoot over 30 days in the production configuration (b12_pzb: hot cell 34.4 psu / 13.4 °C vs 38.8 / 21.2 unbounded; GLORYS 34.9 / 13.7), negligible cost |
 | rivers | `MAB_RIVERS=true` (`mpi05_rivers` env) | GloFAS daily discharge, hand-placed Hudson and Delaware mouths |
 | surface salinity restoring | `MAB_SSS_PISTON=0.5` (m/day) toward GLORYS | holds the shelf, slope and deep salinity |
 | restoring near rivers | `MAB_SSS_RIVER_MASK=30,100` (km), `MAB_SSS_RIVER_QMIN=20` (m³/s) | no restoring within 30 km of mouths with ≥ 20 m³/s, full beyond 100 km: uniform restoring weakened the plumes by 20–30 %, the masked plume equals the unrestored one near the mouths |
@@ -35,7 +35,7 @@ simulation. Analysis: `scripts/analysis_package.sh` (surface, MLD/thermocline se
   surface freshwater flux (the z* volume input alone carries no momentum and barely changes the plumes).
 - **Land mask near the mouths:** do the production land-mask clean-up first (including the suspected channel at
   Cape Cod, 69.94°W 41.81°N, where the 1/60° run has |v| up to 3.9 m/s and z* runs η down to −2.4 m).
-- **Bottom-cell overshoot:** shelf bottom cells heat and salt themselves with WENO tracer advection where vertical
-  mixing at the bottom is weak (CATKE; worse with a weak constant diffusivity, absent with first-order upwind
-  advection or the Ri-based closure). Not yet seen in the 1/60° run. Parked: implications for the WENO scheme to be
-  considered.
+- **Bottom-cell overshoot:** fixed in practice by the bounds-preserving WENO above. Its cause (high-order WENO next to
+  the immersed bottom where vertical mixing is weak; absent with first-order upwind or the Ri-based closure) remains an
+  upstream question about the WENO scheme. The 1/60° run (default advection) has not shown it so far; switch it to
+  the bounded scheme at its next restart.
