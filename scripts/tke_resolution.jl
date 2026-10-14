@@ -25,59 +25,12 @@
 # MAB_OUT:       output prefix (default: the first tag with _tke_resolution)
 using CairoMakie
 include(joinpath(@__DIR__, "mab_analysis_common.jl"))
+include(joinpath(@__DIR__, "mab_checkpoints.jl"))
 
 const TAGS = [run_prefix(t) for t in split(ENV["MAB_TAGS"], ",")]
 const EDGE = parse(Float64, get(ENV, "MAB_EDGE_DEG", "0.75"))
 const OUTP = get(ENV, "MAB_OUT", TAGS[1] * "_tke_resolution")
 const g, ρ₀, R = 9.81, 1026.0, 6.371e6
-
-# ---------------- reading checkpoints ----------------
-rank_number(path) = parse(Int, match(r"_rank(\d+)\.jld2$", path).captures[1])
-checkpoint_path(prefix, r, it) = "$(prefix)_checkpoint_rank$(r)_iteration$(it).jld2"
-const MODEL = "simulation/model/ocean/model"
-
-function checkpoint_days(prefix)
-    files = filter(f -> occursin(Regex("^" * basename(prefix) * "_checkpoint_rank0_iteration\\d+\\.jld2\$"), f), readdir(dirname(prefix)))
-    its = sort(parse.(Int, [match(r"iteration(\d+)\.jld2$", f).captures[1] for f in files]))
-    days = map(its) do it
-        JLD2.jldopen(f -> f["$MODEL/clock"].time, checkpoint_path(prefix, 0, it)) / 86400
-    end
-    return Dict(round(Int, d) => it for (d, it) in zip(days, its) if abs(d - round(d)) < 1e-6)
-end
-
-# Interior cell-centre arrays of T, S, e, u and v (averaged to centres) and face arrays of κc and κu, laid out globally
-function read_state(prefix, it, blocks, ugs)
-    nbx, nby = size(blocks)
-    nx = [ugs[a, 1].Nx for a in 1:nbx]; ny = [ugs[1, b].Ny for b in 1:nby]; Nz = ugs[1, 1].Nz
-    X0 = cumsum([0; nx[1:end-1]]); Y0 = cumsum([0; ny[1:end-1]])
-    Nx, Ny = sum(nx), sum(ny)
-    out = Dict(n => fill(NaN, Nx, Ny, Nz) for n in (:T, :S, :e, :u, :v))
-    merge!(out, Dict(n => fill(NaN, Nx, Ny, Nz + 1) for n in (:κc, :κu)))
-    for a in 1:nbx, b in 1:nby
-        f = JLD2.jldopen(checkpoint_path(prefix, rank_number(blocks[a, b]), it), "r")
-        n, m = nx[a], ny[b]
-        I = X0[a] .+ (1:n); J = Y0[b] .+ (1:m)
-        for (name, key) in ((:T, "tracers/T"), (:S, "tracers/S"), (:e, "tracers/e"), (:u, "velocities/u"), (:v, "velocities/v"))
-            d = f["$MODEL/$key/data"]
-            hx = (size(d, 1) - n) ÷ 2; hy = (size(d, 2) - m) ÷ 2; hz = (size(d, 3) - Nz) ÷ 2
-            K = hz .+ (1:Nz)
-            if name === :u      # x faces: centre i is between faces i and i + 1 (the last one is in the halo or on the boundary)
-                out[name][I, J, :] .= (d[hx .+ (1:n), hy .+ (1:m), K] .+ d[hx .+ (2:n+1), hy .+ (1:m), K]) ./ 2
-            elseif name === :v
-                out[name][I, J, :] .= (d[hx .+ (1:n), hy .+ (1:m), K] .+ d[hx .+ (1:n), hy .+ (2:m+1), K]) ./ 2
-            else
-                out[name][I, J, :] .= d[hx .+ (1:n), hy .+ (1:m), K]
-            end
-        end
-        for (name, key) in ((:κc, "closure_fields/κc"), (:κu, "closure_fields/κu"))
-            d = f["$MODEL/$key/data"]
-            hx = (size(d, 1) - n) ÷ 2; hy = (size(d, 2) - m) ÷ 2; hz = (size(d, 3) - Nz - 1) ÷ 2
-            out[name][I, J, :] .= d[hx .+ (1:n), hy .+ (1:m), hz .+ (1:Nz+1)]
-        end
-        close(f)
-    end
-    return out
-end
 
 # ---------------- column diagnostics ----------------
 # Mean of x over the levels whose depth lies in [lo, hi] (weights w), or the level nearest the middle if none does
@@ -250,14 +203,15 @@ for (n, day) in enumerate(days)
 end
 
 println("\n2. Lower half of the mixed layer: the proposed sink per unit C_Δ, G = Δ|∇ₕb|√e, against CATKE's terms (medians)")
-@printf("%-20s %-12s %10s %10s %10s %8s %8s %10s %12s\n", "region", "run", "G 1e-9", "κcN² 1e-9", "κuS² 1e-9", "G/κcN²", "G/κuS²",
-        "ℓc (m)", "C_Δ max h10")
+@printf("%-20s %-12s %12s %10s %10s %10s %8s %8s %10s %12s\n", "region", "run", "|∇ₕb| 1e-8", "G 1e-9", "κcN² 1e-9", "κuS² 1e-9",
+        "G/κcN²", "G/κuS²", "ℓc (m)", "C_Δ max h10")
 for (reg, rname) in enumerate(regions), (k, r) in enumerate(runs)
     G = sel(blk[k][:G_low], reg); Bv = sel(blk[k][:B_low], reg); Pv = sel(blk[k][:P_low], reg); ℓ = sel(blk[k][:ℓ_low], reg)
-    @printf("%-20s %-12s %10.2f %10.2f %10.2f %8.3f %8.3f %10.3f %12.4f\n", rname[1:min(end, 20)], r.name, 1e9 * med(G), 1e9 * med(Bv),
-            1e9 * med(Pv), med(G ./ Bv), med(G ./ Pv), med(ℓ), med(ℓ) / (sqrt(12) * 10))
+    @printf("%-20s %-12s %12.3f %10.2f %10.2f %10.2f %8.3f %8.3f %10.3f %12.4f\n", rname[1:min(end, 20)], r.name,
+            1e8 * med(sel(blk[k][:∇b_low], reg)), 1e9 * med(G), 1e9 * med(Bv), 1e9 * med(Pv), med(G ./ Bv), med(G ./ Pv), med(ℓ),
+            med(ℓ) / (sqrt(12) * 10))
 end
-println("   (G at each run's own resolution, averaged onto the common blocks; C_Δ max h10 = ℓc/(√12·10 m), the eq. 2.4 bound for h_χ = 10 m)")
+println("   (|∇ₕb| and G at each run's own resolution, averaged onto the common blocks; C_Δ max h10 = ℓc/(√12·10 m), the eq. 2.4 bound for h_χ = 10 m)")
 
 finest = argmax([r.Nx for r in runs])
 println("\n3. TKE excess of each coarser run over $(runs[finest].name), lower half of the ML, against the coarser run's G")
