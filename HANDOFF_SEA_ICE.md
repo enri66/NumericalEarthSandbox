@@ -108,6 +108,58 @@ Findings:
   estimated maximum Δt while the serial default adapts them; give both builds an explicit `SplitExplicitFreeSurface`
   (script 05 already does).
 
+### Rank-edge fix (2026-10-15, side session; triton `runs/seaice/icefix`, envs `mpi05_icefix`, `mpi05_icefix2`)
+
+Cause of the ocean differences: `set!(sea_ice.model, h = …, ℵ = …)` fills the interior only, and the coupled model
+computes its first interface fluxes when it is built. `_assemble_net_ocean_fluxes!` averages ℵ to the u/v faces
+(`ℑxᶠᵃᵃ(ℵ)`, `ℑyᵃᶠᵃ(ℵ)`) for the (1 − ℵ)-weighted wind stress, so the first face of each rank read a zero ℵ halo
+(serially, the neighbour's ℵ). Only the first coupled step's stress was wrong (τˣ 5.6e-9 at face 41), but it grew to
+T 2.5e-2 °C in 4 steps. After the first ice step, ClimaSeaIce's own `update_state!` fills the halos.
+Harness control `FILLICE=true` (fill h, ℵ halos after `set!`) made everything exact before any NumericalEarth change.
+
+NumericalEarth fork branches (from `everything` d9dfcbf6, not PR'd):
+- `sea-ice-halos` (8ced8eab), the fix:
+  - ef05b7b0 the sea-ice exchanger's `initialize!` calls `update_state!(sea_ice.model)` (fills the ice halos);
+  - 8ced8eab `above_freezing_ocean_temperature!` refills the T halos after clipping the initial T to the freezing
+    point (control without it, with a supercooled patch: initial τˣ 5.4e-8 on 2 × 1, τʸ 4.9e-8 on 1 × 2).
+- `sea-ice-halos-frazil` (200414de) = the above + `update_state!(ocean.model)` after the frazil adjustment, for both
+  ClimaSeaIce and `FreezingLimitedOceanTemperature`. The frazil clip changes T after the ocean's `update_state!`;
+  the distributed RK step recomputes the diffusivities/pressure next to rank edges after its halo exchange (from the
+  clipped T), while the rest of the domain and the serial run keep those of the unclipped T. A halo fill alone is not
+  enough (1e-8 left). Cost: a second ocean `update_state!` per coupled step. It also runs the boundary-condition
+  updates a second time per step, so check the oblique-radiation stored state before using it in script 05. Enri to decide.
+- `distributed-sea-ice-halos` (d4bd4eae) is superseded (halo-only frazil fill); delete it.
+
+Results (4 steps of 300 s, immersed, `distributed_sea_ice.jl` at 94aef96; "exact" = 0.00e+00 in u, v, η, T, S, h, ℵ,
+uᵢ, vᵢ and the net ocean fluxes τˣ, τʸ, Jᵀ, Jˢ, Jʷ):
+
+| case | `everything` | `sea-ice-halos` | `sea-ice-halos-frazil` |
+|---|---|---|---|
+| nodynamics, 2 × 1 | T 2.5e-2, u 8e-4 | exact | exact |
+| nodynamics, 1 × 2 | T 1.8e-2, v 5.9e-4 | exact | – |
+| nodynamics + supercooled, at build (NSTEPS=0), 2 × 1 / 1 × 2 | – | exact / exact | – |
+| nodynamics + supercooled, 2 × 1 | – | T 6.5e-4, u 2.6e-6 (frazil every step) | exact |
+| nodynamics + supercooled, 1 × 2 | – | – | exact |
+| noice + supercooled, 2 × 1 | – | T 8.7e-9 (run with ef05b7b0 alone) | exact |
+| full EVP (8 substeps), 1 × 2 | T 1.1e-2, uᵢ 0.26 | exact (ice velocities too) | exact |
+| full EVP, 2 × 1 | T 2.5e-2, uᵢ 0.31 | ocean T 7.0e-6, h 2.9e-6, uᵢ 0.19 of 0.41 at (43, 40) | – |
+| full EVP, no ice advection, 2 × 1 | – | ocean T 7.0e-6, uᵢ 1.5e-8, vᵢ 1.2e-7 | – |
+| noice, 2 × 1 | exact | exact | – |
+
+EVP notes (not fixed): with the ℵ halo fixed, the 1 × 2 EVP case is exact. The 2 × 1 one still differs: small ice
+velocity differences at the x rank edge from the first step (1-step: uᵢ 1e-8, vᵢ 3e-8, ocean v 2e-6), and, with
+WENO ice advection, a large one (0.19 m/s) on the north-wall row next to the rank edge, (43, 40). Likely candidates are
+the EVP substep halo handling in x (`only_local_halos` fills with the 2·substeps + 3 halo) and the ice advection at
+the wall/rank-edge corner. The 483-cell halo issue above still stands.
+
+Regression test idea (NumericalEarth `test/test_distributed_utils.jl`, which already has `rank_window`): build
+`OceanSeaIceModel(ocean_simulation(grid), sea_ice_simulation(grid, ocean; dynamics = nothing); atmosphere)` with a
+constant-wind `PrescribedAtmosphere` on a small LatitudeLongitudeGrid, serially and on `Partition(2, 1)` and
+`Partition(1, 2)`; `set!(sea_ice.model, ℵ = patch)` with the patch crossing the rank edge; compare
+`interior(coupled.interfaces.net_fluxes.ocean.u)` (and `.v`) with the serial window, no time step needed. It fails on
+`everything` (first face of the second rank) and passes on `sea-ice-halos`. Same test with an initial T below freezing
+across the edge covers the clip refill.
+
 ## Suggested plan
 
 1. Pick the region and a winter period with ice growth (check GLORYS `siconc`).
