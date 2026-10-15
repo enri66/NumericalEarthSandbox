@@ -8,7 +8,8 @@
 # freezing point across the rank edges: clipped when the coupled model is built, then frazil forms there).
 # FILLICE=true fills the ice thickness and concentration halos after set! (a control for the unfilled halos set!
 # leaves). SHOWDIFF=true lists the differing cells. The net ocean surface fluxes (τˣ, τʸ, Jᵀ, Jˢ, Jʷ) are compared
-# too; NSTEPS=0 compares the state the coupled model starts from.
+# too; NSTEPS=0 compares the state the coupled model starts from. HALOCHECK=true also compares the lateral halos of the
+# centred fields with the serial values at the same global indices.
 #
 #   PX=2 PY=1 FEATURES=immersed mpiexec -n 2 julia --project=<env> distributed_sea_ice.jl
 using MPI
@@ -18,6 +19,7 @@ using Oceananigans
 using Oceananigans.Units
 using Oceananigans.DistributedComputations: partition, cpu_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.Grids: halo_size
 using NumericalEarth
 using NumericalEarth.SeaIces: sea_ice_dynamics
 using ClimaSeaIce.SeaIceDynamics: SplitExplicitSolver
@@ -31,6 +33,7 @@ const NX = parse(Int, get(ENV, "NX", "80"))
 const NY = parse(Int, get(ENV, "NY", "40"))
 const FILLICE = get(ENV, "FILLICE", "false") == "true"
 const SHOWDIFF = get(ENV, "SHOWDIFF", "false") == "true"
+const HALOCHECK = get(ENV, "HALOCHECK", "false") == "true"
 # On a distributed grid the split-explicit EVP solver widens the halos to 2 substeps + 3 cells, which must fit in each
 # rank's slab; NumericalEarth's default with an RK3 ocean is 240 substeps (483-cell halos)
 const EVP_SUBSTEPS = parse(Int, get(ENV, "EVP_SUBSTEPS", "8"))
@@ -70,7 +73,7 @@ end
 Tᵢ(λ, φ, z) = -1.2 + 0.2 * sin(2π * (λ - λ₀) * 2) * cos(2π * (φ - φ₀) * 2) - 2z / 500
 Sᵢ(λ, φ, z) = 32 - 0.5 * exp(z / 100)
 cold(λ, φ) = exp(-((λ - λ₀ - NX / 24)^2 / 1.0^2 + (φ - φ₀ - NY / 24)^2 / 0.6^2))
-Tˢᶜ(λ, φ, z) = Tᵢ(λ, φ, z) - 0.8 * exp(z / 60) * cold(λ, φ)
+Tˢᶜ(λ, φ, z) = Tᵢ(λ, φ, z) - 1.5 * exp(z / 60) * cold(λ, φ)
 uᵢ(λ, φ, z) = 0.1 * cos(2π * (φ - φ₀) * 2) * exp(z / 200)
 # a patch of ice centred in the box, so that it crosses the rank edges of a 2 × 1 and a 1 × 2 partition
 patch(λ, φ) = exp(-((λ - λ₀ - NX / 24)^2 / 0.6^2 + (φ - φ₀ - NY / 24)^2 / 0.4^2))
@@ -94,8 +97,10 @@ function build(grid)
         FILLICE && foreach(fill_halo_regions!, (sea_ice.model.ice_thickness, sea_ice.model.ice_concentration))
         coupled = OceanSeaIceModel(ocean, sea_ice; atmosphere, radiation)
     end
-    simulation = Simulation(coupled; Δt = DT, stop_iteration = NSTEPS, verbose = false)
-    run!(simulation)
+    if NSTEPS > 0
+        simulation = Simulation(coupled; Δt = DT, stop_iteration = NSTEPS, verbose = false)
+        run!(simulation)
+    end
     return ocean.model, isnothing(sea_ice) ? nothing : sea_ice.model, coupled.interfaces.net_fluxes.ocean
 end
 
@@ -131,6 +136,28 @@ for name in keys(fp)
             ks = [b[3] for b in bad]
             println("     rank $rank $name: $(length(bad)) cells, i ∈ $(extrema(bi)), j ∈ $(extrema(js)), k ∈ $(extrema(ks)); i = $(sort(unique(bi))[1:min(end, 8)])")
         end
+        MPI.Barrier(comm)
+    end
+end
+
+# The lateral halos of the centred fields against the serial field at the same global indices
+if HALOCHECK
+    for name in (:T, :S, :h, :ℵ)
+        haskey(fp, name) || continue
+        dp, ds = fp[name].data, fs[name].data
+        nx, ny = size(grid, 1), size(grid, 2)
+        Hx, Hy = halo_size(grid)[1:2]
+        ri, rj, _ = arch.local_index
+        ox, oy = (ri - 1) * nx, (rj - 1) * ny
+        worst, where = 0.0, (0, 0, 0)
+        for k in axes(interior(fp[name]), 3), j in 1-Hy:ny+Hy, i in 1-Hx:nx+Hx
+            (1 <= i <= nx && 1 <= j <= ny) && continue
+            gi, gj = i + ox, j + oy
+            (1 - Hx <= gi <= NX + Hx && 1 - Hy <= gj <= NY + Hy) || continue
+            d = abs(dp[i, j, k] - ds[gi, gj, k])
+            d > worst && ((worst, where) = (d, (gi, gj, k)))
+        end
+        worst > 0 && println("     rank $rank $name halo: max|Δ| = $worst at global (i, j, k) = $where")
         MPI.Barrier(comm)
     end
 end

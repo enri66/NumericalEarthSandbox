@@ -16,6 +16,6 @@ for c in "${cases[@]}"; do
     FEATURES=${FEATURES//+/,}; export PX PY EVP_SUBSTEPS FEATURES NSTEPS DT
     echo "=== case: $c  FILLICE=${FILLICE:-false}"
     mpirun -np $NP --bind-to none -x LD_LIBRARY_PATH -x PATH -x JULIA_DEPOT_PATH -x MPITRAMPOLINE_LIB -x MPITRAMPOLINE_MPIEXEC -x JULIA_PKG_GC_AUTO \
-           -x PX -x PY -x EVP_SUBSTEPS -x FEATURES -x NSTEPS -x DT -x FILLICE -x SHOWDIFF \
+           -x PX -x PY -x EVP_SUBSTEPS -x FEATURES -x NSTEPS -x DT -x FILLICE -x SHOWDIFF -x HALOCHECK \
            julia -t 4 --project=$JENV $HARNESS 2>&1 | grep -v -e "HostCPUFeatures" -e "CPU info is out-of-date" -e "incorrect CPU feature" -e "mpool.c" -e "incorrect CPU name" -e "Will continue"
 done
