@@ -8,10 +8,12 @@
 #   - biogeochemistry: LOBSTER with Oxygen() and CarbonateSystem(), two-band light with the surface PAR taken from the
 #     ERA5 shortwave (PARFromShortwave), detritus remineralised at the seafloor (InstantRemineralisationSediment,
 #     MAB_BGC_SEDIMENT), and air-sea O₂ and CO₂ exchange with a constant atmospheric pCO₂ (MAB_PCO2, µatm);
-#   - BGC data (bgc_data.jl): NO₃ and O₂ from the WOA monthly climatology; DIC and Alk from placeholders (Alk from
-#     salinity, DIC from Alk) until a data set with the carbonate system is read; the other tracers start from small
-#     uniform values. These give the initial state, the exterior values of the open boundaries (TracerReservoir, as
-#     for T and S) and, with MAB_SPONGE_VARS, the sponge targets of NO₃, O₂, DIC and Alk;
+#   - BGC data (bgc_data.jl): NO₃ and O₂ from the WOA monthly climatology (MAB_BGC_DATA=woa, default) or, with
+#     MAB_BGC_DATA=copernicus, NO₃, O₂ and P from the Copernicus global BGC hindcast (monthly, 1/4°); DIC and Alk from
+#     placeholders (Alk from salinity, DIC from Alk) until a data set with the carbonate system is read; the other
+#     tracers start from small uniform values. These give the initial state, the exterior values of the open
+#     boundaries (TracerReservoir, as for T and S) and, with MAB_SPONGE_VARS, the sponge targets of the tracers with
+#     data (NO₃, O₂, DIC, Alk, and P with Copernicus);
 #   - bounds-preserving WENO-7 keeping every BGC tracer non-negative;
 #   - BGC output: daily de-tided surface and full-depth fields of the BGC tracers.
 #

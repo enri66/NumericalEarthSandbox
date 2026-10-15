@@ -1,18 +1,28 @@
 # BGC data for mab_bgc.jl: the BGC tracers as FieldTimeSeries on the whole-domain source grid `src_grid` (the grid of
 # the GLORYS series), for the initial state, the exterior values of the open boundaries and the sponge targets.
 # Included by mab_bgc.jl after the GLORYS series are built; uses its `src_grid`, `start_date`, `stop_date`, `data_λ`,
-# `data_φ`, `fts_S` and `say`.
+# `data_φ`, `fts_S`, `DATA_DIR`, `comm` and `say`. MAB_BGC_DATA picks the source of NO₃ and O₂ (and P):
 #
-#   NO₃, O₂   WOA monthly climatology (product year 2023, 1°) at mid-month in the top 200 m, the WOA annual field below
-#   Alk, DIC  placeholders until a data set with the carbonate system is read: Alk = 2300 S / 35 and DIC = 0.9 Alk
-#             (mmol/m³), from the GLORYS salinity of the frame closest to each mid-month time
-#   the rest  uniform values (BGC_UNIFORM), used for the initial state and as the boundary exterior values
+#   MAB_BGC_DATA=woa (default)
+#     NO₃, O₂   WOA monthly climatology (product year 2023, 1°) at mid-month in the top 200 m, the WOA annual field below
+#   MAB_BGC_DATA=copernicus
+#     NO₃, O₂   Copernicus Marine global BGC hindcast (GLOBAL_MULTIYEAR_BGC_001_029, PISCES, 1/4°, NumericalEarth's
+#               CopernicusBGCMonthly): the monthly mean of each month placed at mid-month, as the WOA months are
+#     P         the same product's phytoplankton carbon (phyc, mmol C/m³) times the Redfield N:C 16/106
+#               (LOBSTER's P is mmol N/m³)
+#   both
+#     Alk, DIC  placeholders: the Copernicus hindcast has no carbonate system (in v202406 dissic and talk are only in
+#               the analysis-forecast product GLOBAL_ANALYSISFORECAST_BGC_001_028, from 2021-11). Alk = 2300 S / 35 and
+#               DIC = 0.9 Alk (mmol/m³), from the GLORYS salinity of the frame closest to each mid-month time
+#     the rest  uniform values (BGC_UNIFORM), used for the initial state and as the boundary exterior values
 #
-# Every rank builds the same series: the WOA fields are read for a box 2° wider than the GLORYS box and inpainted
-# without writing a cache, so the ranks neither wait on each other nor write the same files (see script 05's notes on
-# the bathymetry and GLORYS caches).
+# Every rank builds the same series: the WOA and Copernicus fields are read for a box wider than the GLORYS box
+# (2° for WOA, 1° for Copernicus) and inpainted without writing a cache, so the ranks neither wait on each other nor
+# write the same files (see script 05's notes on the bathymetry and GLORYS caches). Missing Copernicus files are
+# downloaded first by rank 0 (bgc/bgc_copernicus_download.jl fetches a whole year beforehand).
 
-using NumericalEarth.DataWrangling: Metadatum
+using NumericalEarth.DataWrangling: Metadatum, metadata_path, NearestNeighborInpainting
+import Downloads
 using NumericalEarth.WOA: WOAMonthly, WOAAnnual
 using WorldOceanAtlasTools          # activates the WOA download backend
 
@@ -22,8 +32,18 @@ const WOA_REGION = BoundingBox(longitude = (data_λ[1] - 2, data_λ[2] + 2), lat
 const WOA_NAMES  = (NO₃ = :nitrate, O₂ = :dissolved_oxygen)
 const μmol_per_kg_to_mmol_per_m³ = 1.025   # WOA reports µmol/kg; ρ = 1025 kg/m³
 
-# mmol N/m³ for the nitrogen pools, as LOBSTER's defaults
-const BGC_UNIFORM = (NH₄ = 0.05, P = 0.1, Z = 0.05, DOM = 0.5, sPOM = 0.01, bPOM = 0.01)
+const BGC_DATA = get(ENV, "MAB_BGC_DATA", "woa")
+BGC_DATA in ("woa", "copernicus") || error("MAB_BGC_DATA must be woa or copernicus, got $BGC_DATA")
+
+const COPERNICUS_REGION = BoundingBox(longitude = (data_λ[1] - 1, data_λ[2] + 1), latitude = (data_φ[1] - 1, data_φ[2] + 1))
+const COPERNICUS_DIR    = joinpath(DATA_DIR, "copernicus_bgc")
+const COPERNICUS_NAMES  = (NO₃ = :nitrate, O₂ = :dissolved_oxygen, P = :phytoplankton_carbon)
+const COPERNICUS_FACTOR = (NO₃ = 1.0, O₂ = 1.0, P = 16 / 106)   # the product's units are mmol/m³ (P: mmol C → mmol N)
+
+# mmol N/m³ for the nitrogen pools, as LOBSTER's defaults; P comes from the data with MAB_BGC_DATA=copernicus
+const BGC_UNIFORM = let uniform = (NH₄ = 0.05, P = 0.1, Z = 0.05, DOM = 0.5, sPOM = 0.01, bPOM = 0.01)
+    BGC_DATA == "copernicus" ? Base.structdiff(uniform, NamedTuple{(:P,)}) : uniform
+end
 
 # Mid-month times covering the run, in seconds from start_date (the first may be negative)
 function bgc_frame_dates(start_date, stop_date)
@@ -62,6 +82,39 @@ function woa_series(tracer, dates)
     return fts
 end
 
+copernicus_metadatum(name, date) =
+    Metadatum(name; dataset = CopernicusBGCMonthly(), region = COPERNICUS_REGION, date = firstdayofmonth(date),
+              dir = COPERNICUS_DIR)
+
+# NumericalEarth downloads inside `@root` (rank 0 downloads, then every rank waits at a barrier), so every rank must
+# call `download` for the same files: the list of missing files is made on every rank before any download starts.
+function download_copernicus(dates)
+    wanted  = [copernicus_metadatum(name, d) for name in COPERNICUS_NAMES for d in dates]
+    absent = filter(md -> !isfile(metadata_path(md)), wanted)
+    MPI.Barrier(comm)
+    isempty(absent) || say("  downloading $(length(absent)) Copernicus BGC files into $COPERNICUS_DIR…")
+    foreach(Downloads.download, absent)
+    return nothing
+end
+
+function copernicus_series(tracer, dates)
+    name = COPERNICUS_NAMES[tracer]
+    times = [Dates.value(d - start_date) / 1000 for d in dates]
+    fts = FieldTimeSeries{Center, Center, Center}(src_grid, times)
+    for (n, d) in enumerate(dates)
+        source = Field(copernicus_metadatum(name, d), CPU(); inpainting = NearestNeighborInpainting(Inf),
+                       cache_inpainted_data = false)
+        A = interior(fts[n])
+        for k in axes(A, 3), j in axes(A, 2), i in axes(A, 1)
+            X = Oceananigans.Grids.node(i, j, k, src_grid, Center(), Center(), Center())
+            A[i, j, k] = COPERNICUS_FACTOR[tracer] * interp(X, source)
+        end
+    end
+    say(@sprintf("  %s: Copernicus BGC monthly %s, %d frames, range %.2f to %.2f mmol/m³", tracer, name, length(dates),
+                 minimum(interior(fts[1])), maximum(interior(fts[1]))))
+    return fts
+end
+
 function carbonate_placeholder_series(dates)
     times = [Dates.value(d - start_date) / 1000 for d in dates]
     Alk = FieldTimeSeries{Center, Center, Center}(src_grid, times)
@@ -80,8 +133,13 @@ function bgc_series()
     dates = bgc_frame_dates(start_date, stop_date)
     say("building the BGC series on the whole-domain source grid ($(length(dates)) frames, " *
         "$(Dates.format(first(dates), "yyyy-mm-dd")) → $(Dates.format(last(dates), "yyyy-mm-dd")))…")
-    woa = NamedTuple(tracer => woa_series(tracer, dates) for tracer in keys(WOA_NAMES))
-    return merge(woa, carbonate_placeholder_series(dates))
+    if BGC_DATA == "copernicus"
+        download_copernicus(dates)
+        data = NamedTuple(tracer => copernicus_series(tracer, dates) for tracer in keys(COPERNICUS_NAMES))
+    else
+        data = NamedTuple(tracer => woa_series(tracer, dates) for tracer in keys(WOA_NAMES))
+    end
+    return merge(data, carbonate_placeholder_series(dates))
 end
 
 # DIC (mmol/m³) whose total-scale pH, with alkalinity Alk (meq/m³), temperature T (°C), salinity S and pressure P (bar),
