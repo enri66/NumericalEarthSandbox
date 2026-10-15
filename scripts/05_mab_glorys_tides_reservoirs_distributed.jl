@@ -299,10 +299,20 @@ dates  = start_date : Day(1) : stop_date
 glorys = GLORYSDaily()
 meta(name) = Metadata(name; dataset = glorys, dates, dir = DATA_DIR, region)
 
-say("building GLORYS FieldTimeSeries on the whole-domain source grid (downloads/inpaints as needed)…")
-build_glorys_series() = (FieldTimeSeries(meta(:u_velocity),  src_grid), FieldTimeSeries(meta(:v_velocity), src_grid),
-                         FieldTimeSeries(meta(:temperature), src_grid), FieldTimeSeries(meta(:salinity),   src_grid),
-                         FieldTimeSeries(meta(:free_surface), src_grid))
+# MAB_GLORYS_TIME_INDEXING: "clamp" (default in the GSL region) or "cyclical" (NumericalEarth's default, kept for the MAB).
+# GLORYS daily means sit at noon, so before the first one (the first 12 hours) a cyclical series interpolates toward the
+# LAST frame of the record, and the boundary halo fills at t = 0 read that frame while only frames 1 and 2 are in memory:
+# an out-of-bounds read (found with --check-bounds=yes; it segfaulted the GSL runs at random). Clamped, the series holds
+# the first frame until its time.
+const GLORYS_TIME_INDEXING = get(ENV, "MAB_GLORYS_TIME_INDEXING", REGION == "mab" ? "cyclical" : "clamp")
+GLORYS_TIME_INDEXING in ("clamp", "cyclical") || error("MAB_GLORYS_TIME_INDEXING must be clamp or cyclical, got $GLORYS_TIME_INDEXING")
+glorys_series(name, grid) = GLORYS_TIME_INDEXING == "clamp" ? FieldTimeSeries(meta(name), grid; time_indexing = Oceananigans.OutputReaders.Clamp()) :
+                                                               FieldTimeSeries(meta(name), grid)
+
+say("building GLORYS FieldTimeSeries on the whole-domain source grid (downloads/inpaints as needed, $GLORYS_TIME_INDEXING in time)…")
+build_glorys_series() = (glorys_series(:u_velocity,  src_grid), glorys_series(:v_velocity, src_grid),
+                         glorys_series(:temperature, src_grid), glorys_series(:salinity,   src_grid),
+                         glorys_series(:free_surface, src_grid))
 # Every rank builds the series at the same time. NumericalEarth downloads files and writes the inpainted caches on rank 0
 # only, inside `@root`, which ends in a barrier on every rank, so the ranks must make the same calls in the same order:
 # running the builder on rank 0 first and then on the others paired those barriers wrongly whenever a cache was missing,
@@ -360,7 +370,7 @@ src_grid_native_z = LatitudeLongitudeGrid(CPU(); size = (Nλ_src, Nφ_src, Nz_na
                                           longitude = data_λ, latitude = data_φ,
                                           z = z_native, halo = (7, 7, 7))
 say("building the native-resolution GLORYS u/v for the true depth mean… ($Nz_native levels vs the model's $Nz)")
-build_native_series() = (FieldTimeSeries(meta(:u_velocity), src_grid_native_z), FieldTimeSeries(meta(:v_velocity), src_grid_native_z))
+build_native_series() = (glorys_series(:u_velocity, src_grid_native_z), glorys_series(:v_velocity, src_grid_native_z))
 fts_u_native, fts_v_native = build_native_series()
 Hg_src = glorys_deptho_on_grid(src_grid, DATA_DIR; region)
 true_floors = ((-Hg_src[1, :], -Hg_src[end, :]), (-Hg_src[:, 1], -Hg_src[:, end]))
@@ -1024,7 +1034,7 @@ if SEA_ICE
     const ice_sponge_cells = [(i, j) for i in 1:Nλ, j in 1:Nφ if sponge.μᶜ[i, j] > 0 && bh[i, j] < 0]
     const ice_sponge_μ = [sponge.μᶜ[i, j] for (i, j) in ice_sponge_cells]
     const ice_dates = collect(Date(start_date):Day(1):Date(stop_date))
-    const ice_times = [Float64(Dates.value(DateTime(d) - start_date)) / 1000 for d in ice_dates]
+    const ice_times = [Float64(Dates.value(DateTime(d) + Hour(12) - start_date)) / 1000 for d in ice_dates]   # daily means at noon
     function ice_targets(name)
         target = zeros(length(ice_sponge_cells), length(ice_dates))
         for (n, d) in enumerate(ice_dates)

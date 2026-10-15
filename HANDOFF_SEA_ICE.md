@@ -138,3 +138,30 @@ Findings:
   distributed fixes.
 - Upstream code (Oceananigans, NumericalEarth, ClimaSeaIce) must follow NumericalEarth's restraint rules; PRs need
   Enri's OK before opening.
+
+## One-rank GSL runs (2026-10-15)
+
+Script 05 now takes `MAB_REGION=gsl` and `MAB_SEA_ICE=true` (one rank only); runs use an isolated sandbox copy on triton,
+`/t0/workdir/enrique/Models/NESandbox_ice`, with `scripts/gsl_one_rank.sbatch` (copy of `runs/seaice/gsl/gsl1.sbatch`:
+one triton48 node, mpirun -np 1, production settings z*, partial cells, bounded WENO-7 T/S, SSS restoring 0.5 m/day,
+T,S,u,v sponge; rivers off so far).
+
+- Grid 278 × 128 × 50 at 1/12°. The bathymetry's largest-basin filter removes the Bay of Fundy and Gulf of Maine (they
+  connect to the domain only through the 45°N edge); the estuary closes at 70.9°W; the west side has no wet cells.
+- Sea ice: ClimaSeaIce via `sea_ice_simulation`, EVP with 240 substeps, WENO-7 ice advection, no ice at the start.
+  ClimaSeaIce applies `forcing` only to the ice velocities, so ice enters the open boundaries by restoring thickness and
+  concentration toward GLORYS inside the ocean sponge band after every step (`MAB_ICE_SPONGE_TAU`, default 1 day).
+  GLORYS stores ice-free ocean as missing (not 0) in `siconc`/`sithick`, so the script reads its files directly with
+  missing as no ice; NumericalEarth's Metadata path (inpainting) would spread ice over open water — this also affects
+  `set!` from GLORYS ice and `DatasetRestoring` of ice in NumericalEarth.
+- Out-of-bounds read: GLORYS daily series are Cyclical with 2 frames in memory; before the first (noon) frame they wrap
+  to the last frame, and the `Interpolated` boundary halo fill at t = 0 (in `set_from_frame!`) reads it outside the
+  memory window. With the GSL arrays that segfaulted at random, without a backtrace; `--check-bounds=yes` shows it
+  (`NestedModels/interpolated_fts_boundary.jl:112` → Oceananigans `field_time_series_indexing.jl:340`). The MAB runs very
+  likely read garbage there too (smaller arrays). Script 05: `MAB_GLORYS_TIME_INDEXING=clamp` (default for gsl, the MAB
+  default unchanged); it also stops the first 12 hours of boundary data from leaning toward the last day of the record.
+- Cost on one triton48 node (48 threads): ~30 s per simulated hour ocean-only, ~41 s with sea ice (~50 h per winter).
+- 10-day test (Dec 1–11 2013, `scripts/gsl_ice_vs_glorys.jl`): model ice 18.8k km² on the Labrador side (Lake
+  Melville and the coast) vs GLORYS 0.4k; Gulf 1.8k (upper estuary) vs 0.1k; ice up to 3 m in Lake Melville by Dec 6
+  (dynamic piling?). GLORYS may miss Lake Melville; needs satellite products (OSI SAF / NSIDC, Canadian Ice Service).
+- Full winter running: triton job 11793, tag `ice12_winter` (Dec 1 2013 – Jun 1 2014, 6-hourly ice output).
