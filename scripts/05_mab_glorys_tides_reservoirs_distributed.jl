@@ -100,8 +100,13 @@ const Z_BOTTOM = parse(Float64, get(ENV, "MAB_ZBOTTOM", "5500"))
 const LAND_FRACTION = parse(Float64, get(ENV, "MAB_LAND_FRACTION", "0"))
 
 const n_pad      = 2                       # GLORYS cells between the GLORYS box and the model's open boundaries
-const data_λ     = (-76.0, -64.0)          # GLORYS box (what is on disk)
-const data_φ     = ( 34.0,  42.0)
+# MAB_REGION: the GLORYS box (what is on disk), "mab" (default, 76–64°W, 34–42°N) or "gsl" (the Gulf of St. Lawrence
+# and the Newfoundland–Labrador shelf, 71.5–48°W, 45–56°N, for the sea-ice runs; see HANDOFF_SEA_ICE.md)
+const REGIONS = Dict("mab" => ((-76.0, -64.0), (34.0, 42.0)),
+                     "gsl" => ((-71.5, -48.0), (45.0, 56.0)))
+const REGION = get(ENV, "MAB_REGION", "mab")
+haskey(REGIONS, REGION) || error("MAB_REGION must be one of $(join(sort(collect(keys(REGIONS))), ", ")), got $REGION")
+const data_λ, data_φ = REGIONS[REGION]
 const λ_bounds   = (data_λ[1] + n_pad*src_resolution, data_λ[2] - n_pad*src_resolution)   # model
 const φ_bounds   = (data_φ[1] + n_pad*src_resolution, data_φ[2] - n_pad*src_resolution)
 const Nλ = round(Int, (λ_bounds[2] - λ_bounds[1]) / resolution)
@@ -274,7 +279,16 @@ let whole = Array(interior(bottom_height))[:, :, 1], slab = Array(interior(local
     say(@sprintf("bathymetry slab check: whole-domain %.10e, distributed %.10e, %s", reference, distributed,
                  isapprox(reference, distributed; rtol = 1e-12) ? "MATCH" : "MISMATCH"))
 end
-STAGE == "bathy" && (say("stopping after the grid and bathymetry (MAB_STAGE=bathy)"); exit(0))
+if STAGE == "bathy"
+    # the whole-domain bottom height, for looking at the land mask
+    rank == 0 && jldopen(TAG * "_bathymetry.jld2", "w") do file
+        file["bottom_height"] = Array(interior(bottom_height))[:, :, 1]
+        file["λ"] = collect(λnodes(whole_grid, Center()))
+        file["φ"] = collect(φnodes(whole_grid, Center()))
+    end
+    say("stopping after the grid and bathymetry (MAB_STAGE=bathy), bottom height in $(TAG)_bathymetry.jld2")
+    exit(0)
+end
 
 # ---------------- GLORYS as FieldTimeSeries on the model grid ----------------
 region = BoundingBox(longitude = data_λ, latitude = data_φ)
@@ -878,9 +892,9 @@ IMPLICIT_DRAG || say("bottom drag: explicit")
 # pulls salinity back toward GLORYS and so works against the rivers: turn it down or off together with them.
 const RIVERS = get(ENV, "MAB_RIVERS", "false") == "true"
 const RIVER_MIXING_DEPTH = parse(Float64, get(ENV, "MAB_RIVER_MIXING_DEPTH", "10"))
-# MAB_RIVER_EXTRA (default true) adds the Hudson and the Delaware by hand: GloFAS's automatic mouth detection misses them
-# (see glofas_land.jl)
-const RIVER_EXTRA = get(ENV, "MAB_RIVER_EXTRA", "true") == "true"
+# MAB_RIVER_EXTRA (default true in the MAB region) adds the Hudson and the Delaware by hand: GloFAS's automatic mouth
+# detection misses them (see glofas_land.jl)
+const RIVER_EXTRA = get(ENV, "MAB_RIVER_EXTRA", string(REGION == "mab")) == "true"
 # MAB_SSS_RIVER_MASK="r_in,r_out" (km; with surface salinity restoring, rivers on or off): no restoring within r_in of a river mouth
 # carrying at least MAB_SSS_RIVER_QMIN m³/s on the first day, full restoring beyond r_out, a cos² ramp between, so that the
 # plumes are not restored away while the restoring still holds the open shelf, the slope and the deep water
@@ -970,13 +984,85 @@ set_from_frame!(ocean.model.tracers.S,    fts_S[1])
 # here would make the boundaries import or export that mean in the first few hours.
 set_from_frame!(ocean.model.free_surface.displacement, fts_η[1])
 
+# ---------------- sea ice (MAB_SEA_ICE=true) ----------------
+# ClimaSeaIce through NumericalEarth's sea_ice_simulation on the ocean grid: slab ice and snow thermodynamics, EVP
+# dynamics (split-explicit with MAB_ICE_SUBSTEPS substeps, NumericalEarth's default with the RK3 ocean being 240) and
+# WENO-7 ice advection. The ice starts from none. The ice model has walls at the open boundaries, so ice enters through
+# the sponge band instead: after every step the ice thickness and concentration there are relaxed toward GLORYS, at
+# the rate 1 / MAB_ICE_SPONGE_TAU (days) at the boundary times the ocean sponge's mask (MAB_SPONGE_WIDTH cells wide).
+# GLORYS marks ice-free ocean as missing rather than 0, so its ice is read from the cached files directly with missing
+# values as no ice (NumericalEarth's Metadata path inpaints them, which would spread ice over open water).
+# One rank only: on a distributed grid the coupled ocean differs from serial at the rank edges (HANDOFF_SEA_ICE.md).
+const SEA_ICE = get(ENV, "MAB_SEA_ICE", "false") == "true"
+const ICE_SUBSTEPS = parse(Int, get(ENV, "MAB_ICE_SUBSTEPS", "240"))
+const ICE_SPONGE_TAU = parse(Float64, get(ENV, "MAB_ICE_SPONGE_TAU", "1")) * days
+if SEA_ICE
+    using NumericalEarth.SeaIces: sea_ice_dynamics
+    using ClimaSeaIce.SeaIceDynamics: SplitExplicitSolver
+end
+
+# GLORYS sea ice (siconc or sithick) on the whole-domain model cells, from the nearest GLORYS point, missing as 0
+function glorys_ice_on_grid(name, date)
+    var = name == :sea_ice_concentration ? "siconc" : "sithick"
+    file = joinpath(DATA_DIR, NumericalEarth.DataWrangling.metadata_filename(GLORYSDaily(), name, DateTime(date), region))
+    ds = NCD.Dataset(file)
+    data = Float64.(coalesce.(ds[var][:, :, 1], 0.0))
+    λg, φg = Float64.(ds["longitude"][:]), Float64.(ds["latitude"][:])
+    close(ds)
+    ig = [argmin(abs.(λg .- λ)) for λ in λnodes(ggrid, Center())]
+    jg = [argmin(abs.(φg .- φ)) for φ in φnodes(ggrid, Center())]
+    return [data[ig[i], jg[j]] for i in 1:Nλ, j in 1:Nφ]
+end
+
+if SEA_ICE
+    nranks == 1 || error("MAB_SEA_ICE runs on one rank only (the distributed sea-ice coupling is not exact yet)")
+    ice_dynamics = sea_ice_dynamics(grid, ocean; solver = SplitExplicitSolver(grid; substeps = ICE_SUBSTEPS))
+    sea_ice = sea_ice_simulation(grid, ocean; Δt = Δt_baroclinic, dynamics = ice_dynamics, advection = WENO(order = 7))
+
+    # the GLORYS targets on the sponge cells, one column per GLORYS day
+    const ice_sponge_cells = [(i, j) for i in 1:Nλ, j in 1:Nφ if sponge.μᶜ[i, j] > 0 && bh[i, j] < 0]
+    const ice_sponge_μ = [sponge.μᶜ[i, j] for (i, j) in ice_sponge_cells]
+    const ice_dates = collect(Date(start_date):Day(1):Date(stop_date))
+    const ice_times = [Float64(Dates.value(DateTime(d) - start_date)) / 1000 for d in ice_dates]
+    function ice_targets(name)
+        target = zeros(length(ice_sponge_cells), length(ice_dates))
+        for (n, d) in enumerate(ice_dates)
+            frame_data = glorys_ice_on_grid(name, d)
+            target[:, n] .= [frame_data[i, j] for (i, j) in ice_sponge_cells]
+        end
+        return target
+    end
+    const ice_target_h = ice_targets(:sea_ice_thickness)
+    const ice_target_ℵ = ice_targets(:sea_ice_concentration)
+
+    function restore_sea_ice!(sim)
+        im = sim.model.sea_ice.model
+        h, ℵ = im.ice_thickness, im.ice_concentration
+        n₁, n₂, w = frame(ice_times, sim.model.clock.time)
+        r = Δt_baroclinic / ICE_SPONGE_TAU
+        for (c, (i, j)) in enumerate(ice_sponge_cells)
+            γ = min(1, r * ice_sponge_μ[c])
+            hᴳ = (1 - w) * ice_target_h[c, n₁] + w * ice_target_h[c, n₂]
+            ℵᴳ = (1 - w) * ice_target_ℵ[c, n₁] + w * ice_target_ℵ[c, n₂]
+            h[i, j, 1] += γ * (hᴳ - h[i, j, 1])
+            ℵ[i, j, 1] += γ * (ℵᴳ - ℵ[i, j, 1])
+        end
+        Oceananigans.BoundaryConditions.fill_halo_regions!((h, ℵ))
+        return nothing
+    end
+    say(@sprintf("sea ice: ClimaSeaIce, EVP with %d substeps, WENO-7 advection, no ice at the start; GLORYS ice restored on %d sponge cells (τ = %.2f days at the boundary)",
+                 ICE_SUBSTEPS, length(ice_sponge_cells), ICE_SPONGE_TAU / days))
+end
+
 atmosphere = ERA5PrescribedAtmosphere(; start_date, end_date = stop_date, region,
                                       dir = joinpath(DATA_DIR, "era5"), ERA5_KW...)
 radiation  = ERA5PrescribedRadiation(;  start_date, end_date = stop_date, region,
                                       dir = joinpath(DATA_DIR, "era5"), ERA5_KW...)
 # the river discharge reaches the ocean only with MAB_RIVERS (the land is also built for MAB_SSS_RIVER_MASK's mouth positions)
-model = OceanOnlyModel(ocean; atmosphere, radiation, land = RIVERS ? land : nothing)
+model = SEA_ICE ? OceanSeaIceModel(ocean, sea_ice; atmosphere, radiation, land = RIVERS ? land : nothing) :
+                  OceanOnlyModel(ocean; atmosphere, radiation, land = RIVERS ? land : nothing)
 simulation = Simulation(model; Δt = Δt_baroclinic, stop_time = sim_days * days, stop_iteration = STOP_ITERATION)
+SEA_ICE && add_callback!(simulation, restore_sea_ice!, IterationInterval(1))
 
 # MAB_STAGE=model: everything is built and initialised; report the initial state and stop before time stepping.
 if STAGE == "model"
