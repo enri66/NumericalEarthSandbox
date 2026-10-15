@@ -42,6 +42,33 @@ is needed. Candidates to discuss with Enri:
 A new region means new bathymetry (`regrid_bathymetry` from ETOPO), a land mask clean-up, the open-boundary set-up
 (the OBC code is region-independent), and new GLORYS/ERA5/GloFAS downloads for the region and period.
 
+## Decision (Enri, 2026-10-14)
+
+- Region: the Gulf of St. Lawrence and the Newfoundland–Labrador shelf in one box, about 70.5–48°W, 45–56°N.
+- Period: winter 2013–14, starting ice-free on 2013-12-01 from GLORYS ocean fields, to mid/late May 2014.
+- Development resolution: 1/12°, 50 levels; finer once the coupling works.
+
+GLORYS sea ice in that box (`siconc`, `sithick`, `usi`, `vsi`; daily files on antares A3):
+
+| date | ice area (10³ km²) | ice volume (km³) | southward ice volume flux across 56°N (km³/day) |
+|---|---|---|---|
+| 2013-12-01 | 0.8 | 0.0 | 0.0 |
+| 2013-12-31 | 61 | 33 | 0.7 |
+| 2014-01-30 | 258 | 132 | 2.3 |
+| 2014-03-01 | 381 | 219 | 3.6 |
+| 2014-03-16 | 403 | 249 | 0.7 |
+| 2014-04-15 | 177 | 142 | 0.8 |
+| 2014-05-15 | 80 | 77 | 1.1 |
+| 2014-05-30 | 28 | 20 | 2.3 |
+
+The ice entering across the northern boundary (Labrador shelf) is of the order of the ice volume in the box over the
+winter, so ice open boundaries (sponge restoring of thickness and concentration at least, possibly ice velocity) are
+needed from the start, not as a refinement. The eastern boundary carries almost none.
+
+Other winters checked (Gulf of St. Lawrence part, area 10³ km² on Feb 15 / Mar 10 / Apr 10): 2003 177/212/86,
+2008 143/177/30, 2014 171/159/99, 2015 162/152/30, 2019 115/138/7, 2022 53/115/6, 2024 18/8/0.6 (a contrasting
+low-ice year for later).
+
 ## Suggested plan
 
 1. Pick the region and a winter period with ice growth (check GLORYS `siconc`).
