@@ -81,6 +81,13 @@ simulation, with realistic initial, boundary and river inputs, and validate it a
   `bgc_data.jl` (BGC series on the whole-domain source grid) and `bgc_run.sbatch` (production physics). Physics
   changes to script 05 must be carried over by hand.
 - Triton environment: `/t0/workdir/enrique/mpi05_bgc` (mpi05_rivers + OceanBioME 0.19.4 + WorldOceanAtlasTools).
+- 2-rank test (job 11727, `runs/bgc/bgc2r`, 1/12°, 3 days from 2019-09-01, production physics with rivers): ran to the
+  end, all tracers bounded, phytoplankton growing (P max 0.10 → 0.31 mmol N/m³), no discontinuity across the rank
+  boundary at t = 0 or day 3. About 50 s per model hour on 2 triton24 nodes (script 05 alone: ~18 s); the first time step
+  compiles for ~57 min. OceanBioME warns that the sediment is stepped outside the split Runge-Kutta scheme (first order,
+  not mass conserving): check the nitrogen budget before trusting bottom fluxes.
+- The output files hold the halos (7 cells): strip them before joining ranks.
+- Feb–Mar 2019 forcing for the MAB is now on triton (built from the antares archives by the converter session).
 - NumericalEarth fix: the OceanBioME extension's gas exchange read `sea_ice.model.ice_concentration`, which fails with
   `OceanOnlyModel` (the sea ice is `FreezingLimitedOceanTemperature`); it now calls `sea_ice_concentration`. On the
   fork's `everything` branch as d9dfcbf6; not proposed upstream yet.

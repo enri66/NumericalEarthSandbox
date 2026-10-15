@@ -1187,9 +1187,10 @@ function progress(sim)
     Smin, Smax = allmin(minimum(filter(isfinite, interior(S)))), allmax(maximum(filter(isfinite, interior(S))))
     say(@sprintf("%s  |u|=%.2f |v|=%.2f  η∈[%+.2f,%+.2f]  S∈[%.2f,%.2f]  (%.0f s)",
                  Dates.format(date, "yyyy-mm-dd HH:MM"), umax, vmax, ηmin, ηmax, Smin, Smax, time() - wall[]))
-    # BGC: the range of the tracers most likely to show a problem first
+    # BGC: the range over the water (S > 0; land cells are zero) of the tracers most likely to show a problem first
     tr = sim.model.ocean.model.tracers
-    range_of(c) = (allmin(minimum(interior(c))), allmax(maximum(interior(c))))
+    water = interior(S) .> 0
+    range_of(c) = (allmin(minimum(interior(c)[water]; init = Inf)), allmax(maximum(interior(c)[water]; init = -Inf)))
     say("                  " * join([@sprintf("%s∈[%.3g,%.4g]", name, range_of(tr[name])...) for name in (:NO₃, :P, :Z, :O₂, :DIC, :Alk)], "  "))
     wall[] = time()
     return nothing
