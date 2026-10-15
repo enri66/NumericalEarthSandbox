@@ -84,6 +84,22 @@ function bgc_series()
     return merge(woa, carbonate_placeholder_series(dates))
 end
 
+# DIC (mmol/m³) whose total-scale pH, with alkalinity Alk (meq/m³), temperature T (°C), salinity S and pressure P (bar),
+# is pHᵗ: bisection on DIC, since at fixed Alk the pH falls monotonically as DIC rises. For deriving DIC from the PISCES
+# pH of the Copernicus reanalysis, which has no DIC.
+using OceanBioME.Models.CarbonChemistryModel: CarbonChemistry
+
+function dic_from_pH(pHᵗ, Alk, T, S; P = 0.0, carbon_chemistry = CarbonChemistry(), tolerance = 1e-4)
+    pH(DIC) = carbon_chemistry(; DIC, Alk, T, S, P, output = Val(:pHᵗ))
+    lo, hi = 0.5 * Alk, 1.2 * Alk
+    (pH(lo) ≥ pHᵗ ≥ pH(hi)) || return NaN
+    while hi - lo > tolerance
+        mid = (lo + hi) / 2
+        pH(mid) > pHᵗ ? (lo = mid) : (hi = mid)
+    end
+    return (lo + hi) / 2
+end
+
 # The value of a series at time t on a field's nodes, interpolated in time between its two frames around t
 function set_from_series!(field, fts, t)
     times = collect(fts.times)
