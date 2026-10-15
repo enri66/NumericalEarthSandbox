@@ -127,8 +127,9 @@ simulation, with realistic initial, boundary and river inputs, and validate it a
   `carbonate_from_pH_series` in bgc_data.jl). Build test job 11805 (2 ranks, 2019-02-01, env mpi05_bgc_cmems, sandbox
   copy `Models/NESandbox_bgc_ph`): DIC 233–2167 mmol/m³ on the first day, domain DIC/Alk 0.895, no cell without a
   solution. DIC inherits any error of the salinity alkalinity almost one for one.
-- The reader (NumericalEarth fe421393, local branch `copernicus-bgc`) is not on the fork's `everything` yet, so
-  `mpi05_bgc` cannot use it; runs with MAB_BGC_DATA=copernicus use `JENV=/t0/workdir/enrique/mpi05_bgc_cmems`.
+- The reader (NumericalEarth fe421393) is on the fork's `everything` (pushed 2026-10-15 with Enri's OK) and
+  `mpi05_bgc` is updated to it (old manifest kept as `Manifest.toml.bak-2026-10-15`), so MAB_BGC_DATA=copernicus
+  runs with the default environment. Not proposed upstream.
 
 ## Practical notes
 
