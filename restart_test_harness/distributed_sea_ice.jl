@@ -9,7 +9,9 @@
 # FILLICE=true fills the ice thickness and concentration halos after set! (a control for the unfilled halos set!
 # leaves). SHOWDIFF=true lists the differing cells. The net ocean surface fluxes (τˣ, τʸ, Jᵀ, Jˢ, Jʷ) are compared
 # too; NSTEPS=0 compares the state the coupled model starts from. HALOCHECK=true also compares the lateral halos of the
-# centred fields with the serial values at the same global indices.
+# centred fields with the serial values at the same global indices. EVPPROBE=true snapshots the split-explicit EVP
+# fields at every substep in both builds and reports where each first departs (evp_substep_probe.jl; EVPFIX=corners
+# tries the corner-halo fill there).
 #
 #   PX=2 PY=1 FEATURES=immersed mpiexec -n 2 julia --project=<env> distributed_sea_ice.jl
 using MPI
@@ -24,6 +26,9 @@ using NumericalEarth
 using NumericalEarth.SeaIces: sea_ice_dynamics
 using ClimaSeaIce.SeaIceDynamics: SplitExplicitSolver
 using Printf
+
+const EVPPROBE = get(ENV, "EVPPROBE", "false") == "true"
+EVPPROBE && include(joinpath(@__DIR__, "evp_substep_probe.jl"))
 
 const FEATURES = Set(Symbol.(filter(!isempty, split(get(ENV, "FEATURES", ""), ","))))
 has(f) = f in FEATURES
@@ -95,6 +100,7 @@ function build(grid)
         sea_ice = sea_ice_simulation(grid, ocean; Δt = DT, dynamics, kw...)
         set!(sea_ice.model, h = hᵢ, ℵ = ℵᵢ)
         FILLICE && foreach(fill_halo_regions!, (sea_ice.model.ice_thickness, sea_ice.model.ice_concentration))
+        EVPPROBE && "stress" in EVPFIX && !isnothing(dynamics) && refresh_external_stresses!(sea_ice.model)
         coupled = OceanSeaIceModel(ocean, sea_ice; atmosphere, radiation)
     end
     if NSTEPS > 0
@@ -161,3 +167,5 @@ if HALOCHECK
         MPI.Barrier(comm)
     end
 end
+
+EVPPROBE && compare_evp_snapshots(grid, arch, rank, comm)
