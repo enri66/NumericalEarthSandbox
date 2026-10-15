@@ -954,8 +954,9 @@ if CONSISTENT_UBC
         end
         δ = [abs(Utotal(s, 1, ggrid, (; time = 0.0), nothing)[1] - tb.Uint[1, s]) / tb.Hwet[s]
              for s in eachindex(tb.Hwet) if tb.Hwet[s] > 0]
-        say(@sprintf("consistent normal velocity, %s: depth-uniform correction at t=0 has max %.2e m/s, mean %.2e m/s",
-                     name, maximum(δ), mean(δ)))
+        isempty(δ) ? say("consistent normal velocity, $name: no wet cells on this side") :
+                     say(@sprintf("consistent normal velocity, %s: depth-uniform correction at t=0 has max %.2e m/s, mean %.2e m/s",
+                                  name, maximum(δ), mean(δ)))
     end
 end
 
