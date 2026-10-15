@@ -158,8 +158,8 @@ T,S,u,v sponge; rivers off so far).
   to the last frame, and the `Interpolated` boundary halo fill at t = 0 (in `set_from_frame!`) reads it outside the
   memory window. With the GSL arrays that segfaulted at random, without a backtrace; `--check-bounds=yes` shows it
   (`NestedModels/interpolated_fts_boundary.jl:112` → Oceananigans `field_time_series_indexing.jl:340`). The MAB runs very
-  likely read garbage there too (smaller arrays). Script 05: `MAB_GLORYS_TIME_INDEXING=clamp` (default for gsl, the MAB
-  default unchanged); it also stops the first 12 hours of boundary data from leaning toward the last day of the record.
+  likely read garbage there too (smaller arrays). Script 05: `MAB_GLORYS_TIME_INDEXING=clamp` (the default for every region
+  since 2026-10-15, PRODUCTION_CONFIG.md); it also stops the first 12 hours of boundary data from leaning toward the last day of the record.
 - Cost on one triton48 node (48 threads): ~30 s per simulated hour ocean-only, ~41 s with sea ice (~50 h per winter).
 - 10-day test (Dec 1–11 2013, `scripts/gsl_ice_vs_glorys.jl`): model ice 18.8k km² on the Labrador side (Lake
   Melville and the coast) vs GLORYS 0.4k; Gulf 1.8k (upper estuary) vs 0.1k; ice up to 3 m in Lake Melville by Dec 6

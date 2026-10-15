@@ -299,12 +299,12 @@ dates  = start_date : Day(1) : stop_date
 glorys = GLORYSDaily()
 meta(name) = Metadata(name; dataset = glorys, dates, dir = DATA_DIR, region)
 
-# MAB_GLORYS_TIME_INDEXING: "clamp" (default in the GSL region) or "cyclical" (NumericalEarth's default, kept for the MAB).
+# MAB_GLORYS_TIME_INDEXING: "clamp" (default since 2026-10-15) or "cyclical" (NumericalEarth's default, used before).
 # GLORYS daily means sit at noon, so before the first one (the first 12 hours) a cyclical series interpolates toward the
 # LAST frame of the record, and the boundary halo fills at t = 0 read that frame while only frames 1 and 2 are in memory:
 # an out-of-bounds read (found with --check-bounds=yes; it segfaulted the GSL runs at random). Clamped, the series holds
 # the first frame until its time.
-const GLORYS_TIME_INDEXING = get(ENV, "MAB_GLORYS_TIME_INDEXING", REGION == "mab" ? "cyclical" : "clamp")
+const GLORYS_TIME_INDEXING = get(ENV, "MAB_GLORYS_TIME_INDEXING", "clamp")
 GLORYS_TIME_INDEXING in ("clamp", "cyclical") || error("MAB_GLORYS_TIME_INDEXING must be clamp or cyclical, got $GLORYS_TIME_INDEXING")
 glorys_series(name, grid) = GLORYS_TIME_INDEXING == "clamp" ? FieldTimeSeries(meta(name), grid; time_indexing = Oceananigans.OutputReaders.Clamp()) :
                                                                FieldTimeSeries(meta(name), grid)

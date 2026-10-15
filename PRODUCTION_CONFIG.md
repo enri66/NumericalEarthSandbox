@@ -20,6 +20,7 @@ simulation. Analysis: `scripts/analysis_package.sh` (surface, MLD/thermocline se
 | surface salinity restoring | `MAB_SSS_PISTON=0.5` (m/day) toward GLORYS | holds the shelf, slope and deep salinity |
 | restoring near rivers | `MAB_SSS_RIVER_MASK=30,100` (km), `MAB_SSS_RIVER_QMIN=20` (m³/s) | no restoring within 30 km of mouths with ≥ 20 m³/s, full beyond 100 km: uniform restoring weakened the plumes by 20–30 %, the masked plume equals the unrestored one (Hudson −4.91 psu, 51 cells > 1 psu fresher, vs −3.59 and 39 uniform), and the masked no-river control stays within ±0.004 psu of the uniform one on the shelf, slope and deep water (no drift) |
 | river-mouth mixing | default (0.1 m²/s over the top 10 m) | keeps a plume in one surface cell from driving the salinity to zero |
+| GLORYS time series | `MAB_GLORYS_TIME_INDEXING=clamp` (default since 2026-10-15) | GLORYS daily means sit at noon; cyclical series (the old default) wrap to the last frame of the record for the first 12 hours, and the boundary halo fill at t = 0 read that frame outside the 2-frame memory window: an out-of-bounds read (`--check-bounds=yes`), which segfaulted the GSL runs and in the MAB runs most likely read garbage into the initial boundary halos. Clamped, the series hold the first frame until its time. Runs before this date used cyclical |
 | triton24 nodes | `sbatch --exclude=node[38-41]` | node38's socket-0 memory runs at ~1/45 of normal bandwidth; 39–41 not yet diagnosed (`runs/NODES_README.txt`) |
 
 ## Open items
