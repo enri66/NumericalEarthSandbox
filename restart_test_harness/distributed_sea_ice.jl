@@ -4,8 +4,9 @@
 # NSTEPS coupled steps of DT seconds and compared cell by cell (ocean u, v, η, T, S; ice h, ℵ, u, v).
 # EVP_SUBSTEPS sets the EVP solver's substeps (default 8). FEATURES (comma-separated): immersed (a land strip along the
 # west wall and a seamount), noice (the same ocean and atmosphere without sea ice), noadvection (no ice advection,
-# as in sea_ice_simulation's default), nodynamics (thermodynamics only), supercooled (a near-surface patch below the
-# freezing point across the rank edges: clipped when the coupled model is built, then frazil forms there).
+# as in sea_ice_simulation's default), nodynamics (thermodynamics only), wallice (the ice patch against the south
+# wall at the x rank edge), supercooled (a near-surface patch below the freezing point across the rank edges: clipped
+# when the coupled model is built, then frazil forms there).
 # FILLICE=true fills the ice thickness and concentration halos after set! (a control for the unfilled halos set!
 # leaves). SHOWDIFF=true lists the differing cells. The net ocean surface fluxes (τˣ, τʸ, Jᵀ, Jˢ, Jʷ) are compared
 # too; NSTEPS=0 compares the state the coupled model starts from. HALOCHECK=true also compares the lateral halos of the
@@ -80,8 +81,10 @@ Sᵢ(λ, φ, z) = 32 - 0.5 * exp(z / 100)
 cold(λ, φ) = exp(-((λ - λ₀ - NX / 24)^2 / 1.0^2 + (φ - φ₀ - NY / 24)^2 / 0.6^2))
 Tˢᶜ(λ, φ, z) = Tᵢ(λ, φ, z) - 1.5 * exp(z / 60) * cold(λ, φ)
 uᵢ(λ, φ, z) = 0.1 * cos(2π * (φ - φ₀) * 2) * exp(z / 200)
-# a patch of ice centred in the box, so that it crosses the rank edges of a 2 × 1 and a 1 × 2 partition
-patch(λ, φ) = exp(-((λ - λ₀ - NX / 24)^2 / 0.6^2 + (φ - φ₀ - NY / 24)^2 / 0.4^2))
+# a patch of ice centred in the box, so that it crosses the rank edges of a 2 × 1 and a 1 × 2 partition; with wallice,
+# centred on the south wall at the x rank edge, where the southward wind presses it against the wall
+φᵖ = has(:wallice) ? φ₀ : φ₀ + NY / 24
+patch(λ, φ) = exp(-((λ - λ₀ - NX / 24)^2 / 0.6^2 + (φ - φᵖ)^2 / 0.4^2))
 hᵢ(λ, φ) = 0.8 * patch(λ, φ)
 ℵᵢ(λ, φ) = min(1, 1.2 * patch(λ, φ))
 

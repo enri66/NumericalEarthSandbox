@@ -185,18 +185,42 @@ Results (`immersed`, DT 300, 8 EVP substeps unless noted):
 ("exact" = 0.00e+00 in all 14 compared fields; jobs: probe 11808–11812, verification `verify_11814.log` on the fork
 branch with no probe. Probe with `EVPFIX=stress` alone, on `sea-ice-halos`, was already exact.)
 
-Second, latent issue (no effect here): `fill_halo_regions!` fills a Bounded side's halo over the interior range of the
-other direction only (`fill_halo_size` → `size(grid, loc)`), and neither `only_local_halos` nor the 2 × 1 corner
-exchange (no corner neighbours) fills the corner blocks of the extended halo (rank-edge halo columns × wall halo rows).
-During the substeps those cells keep stale values: the probe saw u off by 0.38 m/s at (40, 0), next to the rank edge
-on the south wall. Here it never reaches the interior (the ice at the walls is marginal and takes the free drift,
-which reads no stresses), but with real ice against a domain wall next to a rank edge it would feed the wall-row
-stresses. `EVPFIX=corners` in the probe fills those blocks (Bounded-side kernels rebuilt with indices spanning the
-connected direction's whole parent range) for u, v every substep and h, ℵ, σ, the external fields once per step;
-with `stress` it stays exact. A ClimaSeaIce fix along those lines is not made; worth a test with ice at a wall first.
+### Wall/rank-edge corner fix (2026-10-15, same side session; envs `mpi05_icefix5`, `mpi05_icefix6`)
 
-Still open: why 1 × 2 was exact on `sea-ice-halos` (λʸ at rank 1's first v face reads `uₑ` at j = 0, the same kind
-of halo); not chased. The 483-cell halo issue (default 240 substeps) is unchanged.
+2 × 2 with the centred patch was exact on `sea-ice-ocean-drag-halos`, but a new harness feature `wallice` (the ice
+patch centred on the south wall at the x rank edge, pressed against it by the southward wind) was not: 2 × 1 and
+2 × 2 both uᵢ 6.2e-3, h 2.9e-4 at (40, 1) after 4 steps (identical, so the 2 × 2 interior corner adds nothing).
+
+Cause (probe, `wall_11817.log`): `fill_halo_regions!` fills a wall's (Bounded side's) halo along the interior of the
+other direction only (`fill_halo_size` → `size(grid, loc)`); neither `only_local_halos` nor the corner exchange (no
+corner neighbour beyond a wall) fills the corner blocks where a wall halo meets the extended rank-edge halo. The
+substeps update u, v in the halo columns, but those corner cells keep the start-of-step values: after substep 1,
+u(41, 0) on rank 0 is stale, so at substep 2 σ₁₁ at the wall-halo centre (40, 0) is off by 196 and ζᶠᶠ at the wall node
+(40, 1); the wall-row shear stress then moves u(40, 1) (7e-7 at substep 2, uᵢ 9e-4 after one step). With the ice at the
+walls marginal (centred patch) the free drift takes over and reads no stresses, which is why it did not show before.
+
+Fix, ClimaSeaIce fork enri66/ClimaSeaIce.jl branch `extended-halo-corners` (81b196b, from v0.5.10, not PR'd):
+`time_step_momentum!` fills u, v with boundary-condition kernels rebuilt (`construct_boundary_conditions_kernels`)
+with indices spanning the connected sides' halos, so the wall fills also cover those columns (true domain corners
+are left as serially). u, v only; h, ℵ, σ and the external fields needed nothing.
+
+Results, all exact (0.00e+00 in the 14 fields), `mpi05_icefix5` = NumericalEarth `sea-ice-ocean-drag-halos` +
+ClimaSeaIce `extended-halo-corners` (`csi_11820.log`, `csi_11821.log`):
+2 × 1 wallice 1 and 4 steps; 2 × 2 wallice 4 steps; 2 × 1, 1 × 2, 2 × 2 centred patch 4 steps; 2 × 1 wallice with 16
+substeps, 8 steps.
+
+Frazil: NumericalEarth branch `sea-ice-halos-frazil-drag` (39047c81) = `sea-ice-halos-frazil` + the drag fix;
+`mpi05_icefix6` = that + the ClimaSeaIce branch (`frz_11823.log`, `frz_11824.log`):
+EVP + supercooled 2 × 1 and 2 × 2, EVP + supercooled + wallice 2 × 1, nodynamics + supercooled 2 × 2, 4 steps: all
+exact. This stack is the full fix set.
+
+Still open:
+- The 483-cell halo issue (default 240 substeps) is unchanged: distributed EVP at production settings needs
+  per-substep halo exchange in ClimaSeaIce or far fewer substeps.
+- `sea-ice-halos-frazil`'s second ocean `update_state!` per step (cost; oblique-radiation stored state unchecked).
+- Script 05's GLORYS ice sponge uses global indices (one rank only); it fills the halos after restoring, so it only
+  needs porting to local indices for a distributed GSL run.
+- Not chased: why 1 × 2 was exact before the drag fix (λʸ at rank 1's first v face reads `uₑ` at j = 0).
 
 Regression test idea (NumericalEarth `test/test_distributed_utils.jl`, which already has `rank_window`): build
 `OceanSeaIceModel(ocean_simulation(grid), sea_ice_simulation(grid, ocean; dynamics = nothing); atmosphere)` with a
