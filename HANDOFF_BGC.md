@@ -92,6 +92,37 @@ simulation, with realistic initial, boundary and river inputs, and validate it a
   `OceanOnlyModel` (the sea ice is `FreezingLimitedOceanTemperature`); it now calls `sea_ice_concentration`. On the
   fork's `everything` branch as d9dfcbf6; not proposed upstream yet.
 
+## Copernicus BGC reader (2026-10-15)
+
+- Product: GLOBAL_MULTIYEAR_BGC_001_029 (PISCES, 1/4°, 75 levels 0.5–5902 m, version 202406, 1993-01 → 2026-08).
+  Datasets: `cmems_mod_glo_bgc_my_0.25deg_P1D-m` (chl, no3, po4, si, o2, nppv), `..._P1M-m` (the same plus fe, phyc,
+  ph, spco2) and `..._static` (deptho and mask in part "mask"). **No DIC or alkalinity in this product**: PISCES
+  dissic/talk exist only in the analysis-forecast product GLOBAL_ANALYSISFORECAST_BGC_001_028, from 2021-11.
+- NumericalEarth: `CopernicusBGCStatic`, `CopernicusBGCDaily`, `CopernicusBGCMonthly`, subtypes of `GLORYSDataset` in the
+  GLORYS module (`src/DataWrangling/GLORYS/copernicus_bgc.jl`), downloaded through the CopernicusMarine extension.
+  Names: `:chlorophyll`, `:nitrate`, `:phosphate`, `:dissolved_silicate`, `:dissolved_oxygen`, `:net_primary_production`
+  (daily and monthly); `:dissolved_iron`, `:phytoplankton_carbon`, `:ph`, `:carbon_dioxide_partial_pressure` (monthly);
+  `:depth` (static). Units are the product's, with no conversion: mmol/m³ for the concentrations (LOBSTER's units),
+  chl mg/m³, nppv mg C/m³/day, ph total scale (dimensionless, 3-D on all 75 levels), spco2 Pa (surface only). The
+  native grid is centred exactly on the file's 1/4° points. Fork branch `copernicus-bgc` (fe421393, on d9dfcbf6 =
+  fork `everything`), local clone worktree `~/dev/NumericalEarth-copernicus-bgc`, **not pushed**; test
+  `test/test_copernicus_bgc_downloading.jl` passes on the Mac (nitracline, O₂ and pH ranges at 35–37°N 200–202°E, static
+  depth, 2-D pCO₂). Restraint checklist run; the diff is +132/−11 including docs and the test.
+- Sandbox: `MAB_BGC_DATA=copernicus` (bgc_data.jl) takes NO₃, O₂ and P from `CopernicusBGCMonthly` at the same
+  mid-month frames as WOA (P = phyc × 16/106, mmol C → mmol N), read for the GLORYS box ±1° and inpainted
+  (NearestNeighborInpainting(Inf), no cache); P then has a series, boundary reservoir and sponge, and leaves
+  BGC_UNIFORM. DIC/Alk stay salinity placeholders (Enri chose DIC from PISCES pH with Alk from salinity, to be written
+  in the NE-BGC session). `bgc_series()` unchanged; WOA stays the default. `bgc/bgc_copernicus_download.jl` fetches
+  NO₃, O₂, phyc and pH for a span of months; bgc_run.sbatch takes `BGC_DATA`, `JENV` and `SANDBOX`.
+- Triton: MAB subset 2018-12 → 2020-01 (NO₃, O₂, phyc, pH; 56 files, 46 MB) in `~/Data/NumericalEarth/copernicus_bgc`.
+  Env `/t0/workdir/enrique/mpi05_bgc_cmems` = mpi05_bgc with NumericalEarth from `/t0/workdir/enrique/dev/NumericalEarth-cmemsbgc`
+  (a copy of the branch). Separate sandbox copy `/t0/workdir/enrique/Models/NESandbox_bgc_cmems` (the main one's bgc/
+  was in use by job 11794). The copernicusmarine wrapper in `julia_depot/scratchspaces/cd43e856-.../copernicusmarine-v2.4.1`
+  had been replaced by the bundled binary (h5py error again) and was restored.
+- 2-rank build (job 11802, 1/12°, MAB_STAGE=model, start 2019-02-01, 30 min): frames 2019-01-15 → 2019-03-15;
+  initial NO₃ 0.03–22.0, O₂ 131–366, P 0.002–2.74 mmol/m³ (WOA-based NO₃/O₂ and uniform P = 0.1 before); BGC sponge on
+  NO₃, O₂, P, Alk, DIC.
+
 ## Practical notes
 
 - Sandbox: `~/Dropbox/Models/NumericalEarthSandbox` (Mac) and `/t0/workdir/enrique/Models/NumericalEarthSandbox`
