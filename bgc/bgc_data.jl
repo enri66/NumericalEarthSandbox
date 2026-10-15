@@ -166,9 +166,9 @@ function carbonate_from_pH_series(dates)
         fallbacks += length(failed)
         D[failed] .= 0.9 .* A[failed]
     end
-    say(@sprintf("  Alk = 2300 S / 35; DIC from the Copernicus monthly pH (%d frames, range %.0f to %.0f mmol/m³; " *
-                 "%d of %d cell-frames fell back to DIC = 0.9 Alk)", length(dates), minimum(interior(DIC[1])),
-                 maximum(interior(DIC[1])), fallbacks, length(dates) * length(interior(DIC[1]))))
+    say(@sprintf("  Alk = 2300 S / 35; DIC from the Copernicus monthly pH (%d frames, range %.0f to %.0f mmol/m³; %d of %d cell-frames fell back to DIC = 0.9 Alk)",
+                 length(dates), minimum(interior(DIC[1])), maximum(interior(DIC[1])), fallbacks,
+                 length(dates) * length(interior(DIC[1]))))
     return (; Alk, DIC)
 end
 
