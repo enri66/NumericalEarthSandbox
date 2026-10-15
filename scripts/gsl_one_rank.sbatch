@@ -15,4 +15,4 @@ export MAB_REGION=${REGION:-gsl} MAB_START_DATE=${START:-2013-12-01} MAB_DAYS=${
 # launched through mpirun even on one rank, as production does (a bare julia start segfaulted, 2026-10-15)
 mpirun -np 1 --bind-to none -x LD_LIBRARY_PATH -x PATH -x JULIA_DEPOT_PATH -x MPITRAMPOLINE_LIB -x MPITRAMPOLINE_MPIEXEC -x JULIA_PKG_GC_AUTO \
     $(env | grep -o "^MAB_[A-Z_0-9]*" | sed "s/^/-x /" | tr "\n" " ") \
-    julia ${JULIA_FLAGS} -t ${THREADS:-48} --project=/t0/workdir/enrique/mpi05_ib scripts/05_mab_glorys_tides_reservoirs_distributed.jl 2>&1 | grep -v -e HostCPUFeatures -e "CPU info is out-of-date" -e "incorrect CPU feature"
+    julia ${JULIA_FLAGS} -t ${THREADS:-48} --project=/t0/workdir/enrique/mpi05_ib scripts/05_mab_glorys_tides_reservoirs_distributed.jl 2>&1 | grep --line-buffered -v -e HostCPUFeatures -e "CPU info is out-of-date" -e "incorrect CPU feature"

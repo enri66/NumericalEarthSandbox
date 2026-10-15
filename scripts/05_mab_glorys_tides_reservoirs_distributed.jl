@@ -1369,6 +1369,14 @@ if get(ENV, "MAB_BAROTROPIC_OUTPUT", "false") == "true"
         filename = joinpath(@__DIR__, "..", TAG * "_barotropic.jld2"),
         schedule = TimeInterval(1hours), overwrite_files = fresh_start)
 end
+# MAB_SEA_ICE: the ice thickness, concentration and velocity every 6 hours
+if SEA_ICE
+    im = sea_ice.model
+    simulation.output_writers[:sea_ice] = JLD2Writer(im, (h = im.ice_thickness, ℵ = im.ice_concentration,
+                                                         u = im.velocities.u, v = im.velocities.v);
+        filename = joinpath(@__DIR__, "..", TAG * "_sea_ice.jld2"),
+        schedule = TimeInterval(6hours), overwrite_files = fresh_start)
+end
 simulation.output_writers[:eta_daily] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta_daily.jld2"),
     schedule = FilteredTimeInterval(LanczosKernel(6days; cutoff = 40hours); interval = 1days), overwrite_files = fresh_start)
