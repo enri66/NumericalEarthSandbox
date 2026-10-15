@@ -2,7 +2,8 @@
 # dynamics, coupled to a prescribed atmosphere) give the same answer on a PX × PY partition as serially? A cold box near
 # 50°N, an ice patch that the wind and the ocean push across the rank edges, built serially and distributed, stepped
 # NSTEPS coupled steps of DT seconds and compared cell by cell (ocean u, v, η, T, S; ice h, ℵ, u, v).
-# FEATURES (comma-separated): immersed (a land strip along the west wall and a seamount), noadvection (no ice advection,
+# EVP_SUBSTEPS sets the EVP solver's substeps (default 8). FEATURES (comma-separated): immersed (a land strip along the
+# west wall and a seamount), noice (the same ocean and atmosphere without sea ice), noadvection (no ice advection,
 # as in sea_ice_simulation's default), nodynamics (thermodynamics only).
 #
 #   PX=2 PY=1 FEATURES=immersed mpiexec -n 2 julia --project=<env> distributed_sea_ice.jl
@@ -13,14 +14,22 @@ using Oceananigans
 using Oceananigans.Units
 using Oceananigans.DistributedComputations: partition, cpu_architecture
 using NumericalEarth
+using NumericalEarth.SeaIces: sea_ice_dynamics
+using ClimaSeaIce.SeaIceDynamics: SplitExplicitSolver
 using Printf
 
 const FEATURES = Set(Symbol.(filter(!isempty, split(get(ENV, "FEATURES", ""), ","))))
 has(f) = f in FEATURES
 const NSTEPS = parse(Int, get(ENV, "NSTEPS", "4"))
 const DT = parse(Float64, get(ENV, "DT", "300"))
-const NX = parse(Int, get(ENV, "NX", "40"))
-const NY = parse(Int, get(ENV, "NY", "20"))
+const NX = parse(Int, get(ENV, "NX", "80"))
+const NY = parse(Int, get(ENV, "NY", "40"))
+# On a distributed grid the split-explicit EVP solver widens the halos to 2 substeps + 3 cells, which must fit in each
+# rank's slab; NumericalEarth's default with an RK3 ocean is 240 substeps (483-cell halos)
+const EVP_SUBSTEPS = parse(Int, get(ENV, "EVP_SUBSTEPS", "8"))
+# Barotropic substeps, the same for both builds: NumericalEarth's default free surface fixes them from an estimated
+# maximum Δt on a distributed grid but adapts them to Δt serially (9 are enough here at DT = 300 s)
+const BAROTROPIC_SUBSTEPS = parse(Int, get(ENV, "BAROTROPIC_SUBSTEPS", "20"))
 const λ₀, φ₀ = -60.0, 48.0          # the south-west corner; 1/12° cells as in the regional runs
 
 function make_grid(arch)
@@ -34,8 +43,9 @@ end
 
 # A cold, windy atmosphere on its own serial grid, wider than the ocean box, constant in time
 function make_atmosphere()
-    grid = LatitudeLongitudeGrid(CPU(); size = (32, 20), longitude = (λ₀ - 1, λ₀ + 3), latitude = (φ₀ - 1, φ₀ + 1.5),
-                                 topology = (Bounded, Bounded, Flat))
+    Lλ, Lφ = NX / 12 + 2, NY / 12 + 2          # the ocean box with a 1° margin, at 1/4°
+    grid = LatitudeLongitudeGrid(CPU(); size = (ceil(Int, 4Lλ), ceil(Int, 4Lφ)), longitude = (λ₀ - 1, λ₀ - 1 + ceil(Int, 4Lλ) / 4),
+                                 latitude = (φ₀ - 1, φ₀ - 1 + ceil(Int, 4Lφ) / 4), topology = (Bounded, Bounded, Flat))
     times = [0.0, 10days]
     atmosphere = PrescribedAtmosphere(grid, times)
     radiation = PrescribedRadiation(grid, times)
@@ -59,17 +69,24 @@ hᵢ(λ, φ) = 0.8 * patch(λ, φ)
 ℵᵢ(λ, φ) = min(1, 1.2 * patch(λ, φ))
 
 function build(grid)
-    ocean = ocean_simulation(grid; Δt = DT)
+    free_surface = SplitExplicitFreeSurface(grid; substeps = BAROTROPIC_SUBSTEPS)
+    ocean = ocean_simulation(grid; Δt = DT, free_surface)
     set!(ocean.model, T = Tᵢ, S = Sᵢ, u = uᵢ)
-    kw = has(:noadvection) ? (;) : (; advection = WENO(order = 7))
-    kw = has(:nodynamics) ? merge(kw, (; dynamics = nothing)) : kw
-    sea_ice = sea_ice_simulation(grid, ocean; Δt = DT, kw...)
-    set!(sea_ice.model, h = hᵢ, ℵ = ℵᵢ)
     atmosphere, radiation = make_atmosphere()
-    coupled = OceanSeaIceModel(ocean, sea_ice; atmosphere, radiation)
+    if has(:noice)
+        coupled = OceanOnlyModel(ocean; atmosphere, radiation)
+        sea_ice = nothing
+    else
+        kw = has(:noadvection) ? (;) : (; advection = WENO(order = 7))
+        dynamics = has(:nodynamics) ? nothing :
+                   sea_ice_dynamics(grid, ocean; solver = SplitExplicitSolver(grid; substeps = EVP_SUBSTEPS))
+        sea_ice = sea_ice_simulation(grid, ocean; Δt = DT, dynamics, kw...)
+        set!(sea_ice.model, h = hᵢ, ℵ = ℵᵢ)
+        coupled = OceanSeaIceModel(ocean, sea_ice; atmosphere, radiation)
+    end
     simulation = Simulation(coupled; Δt = DT, stop_iteration = NSTEPS, verbose = false)
     run!(simulation)
-    return ocean.model, sea_ice.model
+    return ocean.model, isnothing(sea_ice) ? nothing : sea_ice.model
 end
 
 comm = MPI.COMM_WORLD
@@ -82,10 +99,11 @@ op, ip = build(grid)
 os, is = build(make_grid(CPU()))
 cpu_arch = cpu_architecture(arch)
 
-fields(o, i) = (u = o.velocities.u, v = o.velocities.v, η = o.free_surface.displacement, T = o.tracers.T, S = o.tracers.S,
-                h = i.ice_thickness, ℵ = i.ice_concentration, uᵢ = i.velocities.u, vᵢ = i.velocities.v)
-rank == 0 && @printf("FEATURES = %-30s NSTEPS = %d  DT = %g  partition %d × %d\n",
-                     join(sort(collect(string.(FEATURES))), ","), NSTEPS, DT, PX, PY)
+ocean_fields(o) = (u = o.velocities.u, v = o.velocities.v, η = o.free_surface.displacement, T = o.tracers.T, S = o.tracers.S)
+fields(o, ::Nothing) = ocean_fields(o)
+fields(o, i) = merge(ocean_fields(o), (h = i.ice_thickness, ℵ = i.ice_concentration, uᵢ = i.velocities.u, vᵢ = i.velocities.v))
+rank == 0 && @printf("FEATURES = %-30s NSTEPS = %d  DT = %g  EVP substeps %d  partition %d × %d\n",
+                     join(sort(collect(string.(FEATURES))), ","), NSTEPS, DT, EVP_SUBSTEPS, PX, PY)
 fp, fs = fields(op, ip), fields(os, is)
 for name in keys(fp)
     p = interior(fp[name]); s = partition(interior(fs[name]), cpu_arch, size(p))

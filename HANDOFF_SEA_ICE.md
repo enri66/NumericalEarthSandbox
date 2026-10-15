@@ -69,6 +69,45 @@ Other winters checked (Gulf of St. Lawrence part, area 10³ km² on Feb 15 / Mar
 2008 143/177/30, 2014 171/159/99, 2015 162/152/30, 2019 115/138/7, 2022 53/115/6, 2024 18/8/0.6 (a contrasting
 low-ice year for later).
 
+The data box is 71.5–48°W, 45–56°N (west edge moved from 70.5°W so the St. Lawrence estuary closes near Québec
+instead of crossing an open boundary). The 45°N southern edge crosses the Bay of Fundy; plan to mask Fundy/Gulf of Maine
+as land (e.g. water west of 64.2°W and south of 45.95°N) rather than open a boundary through its tides.
+
+## Data (staged 2026-10-14)
+
+Cut from the antares archives with `scripts/regional_cache_from_archives.jl` (checked against NumericalEarth's own
+downloads for the MAB box: GLORYS and GloFAS identical, ERA5 identical up to float32 rounding), 2013-11-25 to
+2014-06-05, and synced to triton's `/t0/workdir/enrique/Data/NumericalEarth` (region suffix `_-71.5_-48.0_45.0_56.0`):
+GLORYS daily thetao, so, uo, vo, zos, siconc, sithick, usi, vsi; ERA5 hourly u10, v10, t2m, d2m, sp, tp, sf, ssrd, strd;
+GloFAS daily discharge; GLORYS static deptho and the ERA5 land-sea mask (`scripts/stage_static_region_data.jl`, and
+on triton `fetch_lsm_gsl.jl`: antares' CDS file fetch fails with an SSL certificate error).
+
+## Distributed sea ice (2026-10-14, `restart_test_harness/distributed_sea_ice.jl`, triton `runs/seaice`)
+
+Coupled ocean_simulation + sea_ice_simulation + prescribed cold, windy atmosphere, 80 × 40 × 10 at 1/12° near 50°N,
+land strip + seamount, an ice patch across the rank edges, 4 steps of 300 s, distributed vs serial:
+
+| case | ocean u, v, η, T, S | ice h, ℵ | ice u, v |
+|---|---|---|---|
+| 1 × 1 (Distributed arch, one rank) | exact | exact | exact |
+| ocean only (no sea ice), 2 × 1 | exact | – | – |
+| ice thermodynamics only, 2 × 1 | T 2.5e-2 °C, u 8e-4 m/s at the rank edge | 1.5e-9 | – |
+| full (EVP, 8 substeps), 2 × 1 | as above | h 4.7e-2 m | 0.31 of 0.41 m/s, at the rank edge |
+| full (EVP, 8 substeps), 1 × 2 | T 1.1e-2 °C | h 5.0e-2 m | 0.26 of 0.35 m/s, at the rank edge |
+
+Findings:
+- The ocean differs at rank edges as soon as sea ice is coupled, even without ice dynamics; ocean-only is exact. Likely an
+  un-exchanged halo in NumericalEarth's ocean–sea-ice flux path (the same family as NumericalEarth #746 and the CATKE
+  Jᵇ halo of Oceananigans #6184).
+- ClimaSeaIce's split-explicit EVP on a distributed grid gives wrong ice velocities at rank edges.
+- Its distributed design widens the velocity halos to 2·substeps + 3 cells and does not communicate during substeps;
+  with NumericalEarth's default 240 substeps (RK3 ocean) that is 483 cells, which must fit inside each rank's slab, so
+  it cannot run with any practical regional partition. A distributed EVP needs halo communication every substep (or a
+  much smaller halo budget).
+- Harness note: NumericalEarth's default free surface on a distributed grid fixes the barotropic substeps from an
+  estimated maximum Δt while the serial default adapts them; give both builds an explicit `SplitExplicitFreeSurface`
+  (script 05 already does).
+
 ## Suggested plan
 
 1. Pick the region and a winter period with ice growth (check GLORYS `siconc`).
