@@ -1,19 +1,21 @@
 # BGC data for mab_bgc.jl: the BGC tracers as FieldTimeSeries on the whole-domain source grid `src_grid` (the grid of
 # the GLORYS series), for the initial state, the exterior values of the open boundaries and the sponge targets.
 # Included by mab_bgc.jl after the GLORYS series are built; uses its `src_grid`, `start_date`, `stop_date`, `data_λ`,
-# `data_φ`, `fts_S`, `DATA_DIR`, `comm` and `say`. MAB_BGC_DATA picks the source of NO₃ and O₂ (and P):
+# `data_φ`, `fts_S`, `fts_T`, `DATA_DIR`, `comm` and `say`. MAB_BGC_DATA picks the source of NO₃ and O₂ (and P, DIC):
 #
 #   MAB_BGC_DATA=woa (default)
 #     NO₃, O₂   WOA monthly climatology (product year 2023, 1°) at mid-month in the top 200 m, the WOA annual field below
+#     Alk, DIC  placeholders: Alk = 2300 S / 35 and DIC = 0.9 Alk (mmol/m³), from the GLORYS salinity of the frame
+#               closest to each mid-month time
 #   MAB_BGC_DATA=copernicus
 #     NO₃, O₂   Copernicus Marine global BGC hindcast (GLOBAL_MULTIYEAR_BGC_001_029, PISCES, 1/4°, NumericalEarth's
 #               CopernicusBGCMonthly): the monthly mean of each month placed at mid-month, as the WOA months are
 #     P         the same product's phytoplankton carbon (phyc, mmol C/m³) times the Redfield N:C 16/106
 #               (LOBSTER's P is mmol N/m³)
+#     Alk, DIC  the hindcast has no carbonate system (in v202406 dissic and talk are only in the analysis-forecast
+#               product GLOBAL_ANALYSISFORECAST_BGC_001_028, from 2021-11): Alk = 2300 S / 35 as above, and DIC from the
+#               hindcast's monthly total-scale pH (carbonate_from_pH_series)
 #   both
-#     Alk, DIC  placeholders: the Copernicus hindcast has no carbonate system (in v202406 dissic and talk are only in
-#               the analysis-forecast product GLOBAL_ANALYSISFORECAST_BGC_001_028, from 2021-11). Alk = 2300 S / 35 and
-#               DIC = 0.9 Alk (mmol/m³), from the GLORYS salinity of the frame closest to each mid-month time
 #     the rest  uniform values (BGC_UNIFORM), used for the initial state and as the boundary exterior values
 #
 # Every rank builds the same series: the WOA and Copernicus fields are read for a box wider than the GLORYS box
@@ -39,6 +41,7 @@ const COPERNICUS_REGION = BoundingBox(longitude = (data_λ[1] - 1, data_λ[2] + 
 const COPERNICUS_DIR    = joinpath(DATA_DIR, "copernicus_bgc")
 const COPERNICUS_NAMES  = (NO₃ = :nitrate, O₂ = :dissolved_oxygen, P = :phytoplankton_carbon)
 const COPERNICUS_FACTOR = (NO₃ = 1.0, O₂ = 1.0, P = 16 / 106)   # the product's units are mmol/m³ (P: mmol C → mmol N)
+const COPERNICUS_PH     = :ph                                    # monthly total-scale pH, for DIC
 
 # mmol N/m³ for the nitrogen pools, as LOBSTER's defaults; P comes from the data with MAB_BGC_DATA=copernicus
 const BGC_UNIFORM = let uniform = (NH₄ = 0.05, P = 0.1, Z = 0.05, DOM = 0.5, sPOM = 0.01, bPOM = 0.01)
@@ -89,7 +92,7 @@ copernicus_metadatum(name, date) =
 # NumericalEarth downloads inside `@root` (rank 0 downloads, then every rank waits at a barrier), so every rank must
 # call `download` for the same files: the list of missing files is made on every rank before any download starts.
 function download_copernicus(dates)
-    wanted  = [copernicus_metadatum(name, d) for name in COPERNICUS_NAMES for d in dates]
+    wanted  = [copernicus_metadatum(name, d) for name in (COPERNICUS_NAMES..., COPERNICUS_PH) for d in dates]
     absent = filter(md -> !isfile(metadata_path(md)), wanted)
     MPI.Barrier(comm)
     isempty(absent) || say("  downloading $(length(absent)) Copernicus BGC files into $COPERNICUS_DIR…")
@@ -129,6 +132,46 @@ function carbonate_placeholder_series(dates)
     return (; Alk, DIC)
 end
 
+# DIC (mmol/m³) whose total-scale pH, with alkalinity Alk (meq/m³), temperature T (°C), salinity S and pressure P (bar),
+# is pHᵗ: bisection on DIC, since at fixed Alk the pH falls monotonically as DIC rises. NaN when no DIC in
+# [0.5 Alk, 1.2 Alk] gives that pH.
+using OceanBioME.Models.CarbonChemistryModel: CarbonChemistry
+
+# With MAB_BGC_DATA=copernicus: Alk from the salinity as in the placeholder, and DIC from the hindcast's monthly
+# total-scale pH (PISCES) at the GLORYS temperature and salinity of the frame closest to each mid-month time and the
+# pressure of the cell (1 bar per 10 m), so that the model's carbonate system starts and is restored at the hindcast's
+# pH. Where no DIC gives that pH (the freshest estuary cells, where the salinity alkalinity is far from PISCES's),
+# DIC = 0.9 Alk as in the placeholder.
+function carbonate_from_pH_series(dates)
+    times = [Dates.value(d - start_date) / 1000 for d in dates]
+    Alk = FieldTimeSeries{Center, Center, Center}(src_grid, times)
+    DIC = FieldTimeSeries{Center, Center, Center}(src_grid, times)
+    carbon_chemistry = CarbonChemistry()
+    fallbacks = 0
+    for (n, d) in enumerate(dates)
+        pH = Field(copernicus_metadatum(COPERNICUS_PH, d), CPU(); inpainting = NearestNeighborInpainting(Inf),
+                   cache_inpainted_data = false)
+        m = argmin(abs.(collect(fts_S.times) .- times[n]))
+        S, T = interior(fts_S[m]), interior(fts_T[m])
+        A, D = interior(Alk[n]), interior(DIC[n])
+        A .= 2300 .* S ./ 35
+        Threads.@threads for k in axes(D, 3)
+            for j in axes(D, 2), i in axes(D, 1)
+                X = Oceananigans.Grids.node(i, j, k, src_grid, Center(), Center(), Center())
+                D[i, j, k] = dic_from_pH(interp(X, pH), A[i, j, k], T[i, j, k], S[i, j, k];
+                                         P = -X[3] / 10, carbon_chemistry, tolerance = 1e-2)
+            end
+        end
+        failed = findall(isnan, D)
+        fallbacks += length(failed)
+        D[failed] .= 0.9 .* A[failed]
+    end
+    say(@sprintf("  Alk = 2300 S / 35; DIC from the Copernicus monthly pH (%d frames, range %.0f to %.0f mmol/m³; " *
+                 "%d of %d cell-frames fell back to DIC = 0.9 Alk)", length(dates), minimum(interior(DIC[1])),
+                 maximum(interior(DIC[1])), fallbacks, length(dates) * length(interior(DIC[1]))))
+    return (; Alk, DIC)
+end
+
 function bgc_series()
     dates = bgc_frame_dates(start_date, stop_date)
     say("building the BGC series on the whole-domain source grid ($(length(dates)) frames, " *
@@ -136,16 +179,12 @@ function bgc_series()
     if BGC_DATA == "copernicus"
         download_copernicus(dates)
         data = NamedTuple(tracer => copernicus_series(tracer, dates) for tracer in keys(COPERNICUS_NAMES))
+        return merge(data, carbonate_from_pH_series(dates))
     else
         data = NamedTuple(tracer => woa_series(tracer, dates) for tracer in keys(WOA_NAMES))
+        return merge(data, carbonate_placeholder_series(dates))
     end
-    return merge(data, carbonate_placeholder_series(dates))
 end
-
-# DIC (mmol/m³) whose total-scale pH, with alkalinity Alk (meq/m³), temperature T (°C), salinity S and pressure P (bar),
-# is pHᵗ: bisection on DIC, since at fixed Alk the pH falls monotonically as DIC rises. For deriving DIC from the PISCES
-# pH of the Copernicus reanalysis, which has no DIC.
-using OceanBioME.Models.CarbonChemistryModel: CarbonChemistry
 
 function dic_from_pH(pHᵗ, Alk, T, S; P = 0.0, carbon_chemistry = CarbonChemistry(), tolerance = 1e-4)
     pH(DIC) = carbon_chemistry(; DIC, Alk, T, S, P, output = Val(:pHᵗ))
