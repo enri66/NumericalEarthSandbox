@@ -66,6 +66,25 @@ simulation, with realistic initial, boundary and river inputs, and validate it a
 - Distributed runs: check that the BGC extension's kernels (gas exchange, PAR) work with the MPI layout of script 05
   on a small 2-rank case.
 
+## Decisions and status (NE-BGC session, 2026-10-14)
+
+- Model: LOBSTER + `Oxygen()` + `CarbonateSystem()` from the start (NO₃, NH₄, P, Z, DOM, sPOM, bPOM, DIC, Alk, O₂), two-band
+  light under `PARFromShortwave`, and `InstantRemineralisationSediment` returning sinking sPOM/bPOM to NH₄ at the seafloor.
+  Without the sediment the sinking detritus leaves through the immersed bottom and its nitrogen is lost (column test).
+- Data: WOA first (NO₃ and O₂: monthly in the top 200 m, annual below 300 m; the 1° monthly nutrient analyses are
+  noisy at depth), DIC and Alk as salinity placeholders; then a reader for the Copernicus global BGC reanalysis
+  (GLOBAL_MULTIYEAR_BGC_001_029, 1/4°, daily, 1993 on) for the initial state, boundaries and sponge.
+- Prototype period: from 2019-02-01 (winter-spring bloom). Triton's MAB cache holds 2019-04 to 2020-04 only; Feb–Mar
+  2019 is in the antares global archives (ERA5 on A2, GLORYS12 and GloFAS on A3) and needs converting into the
+  per-region cache files.
+- Code: `bgc/` holds the BGC run (`mab_bgc.jl`, a copy of script 05 at 45d50d8 with sections marked "BGC"),
+  `bgc_data.jl` (BGC series on the whole-domain source grid) and `bgc_run.sbatch` (production physics). Physics
+  changes to script 05 must be carried over by hand.
+- Triton environment: `/t0/workdir/enrique/mpi05_bgc` (mpi05_rivers + OceanBioME 0.19.4 + WorldOceanAtlasTools).
+- NumericalEarth fix: the OceanBioME extension's gas exchange read `sea_ice.model.ice_concentration`, which fails with
+  `OceanOnlyModel` (the sea ice is `FreezingLimitedOceanTemperature`); it now calls `sea_ice_concentration`. On the
+  fork's `everything` branch as d9dfcbf6; not proposed upstream yet.
+
 ## Practical notes
 
 - Sandbox: `~/Dropbox/Models/NumericalEarthSandbox` (Mac) and `/t0/workdir/enrique/Models/NumericalEarthSandbox`
