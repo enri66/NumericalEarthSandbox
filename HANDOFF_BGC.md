@@ -122,6 +122,13 @@ simulation, with realistic initial, boundary and river inputs, and validate it a
 - 2-rank build (job 11802, 1/12°, MAB_STAGE=model, start 2019-02-01, 30 min): frames 2019-01-15 → 2019-03-15;
   initial NO₃ 0.03–22.0, O₂ 131–366, P 0.002–2.74 mmol/m³ (WOA-based NO₃/O₂ and uniform P = 0.1 before); BGC sponge on
   NO₃, O₂, P, Alk, DIC.
+- DIC from pH (Enri's choice, 2026-10-15): with MAB_BGC_DATA=copernicus, Alk = 2300 S / 35 and DIC is the value whose
+  total-scale pH at the GLORYS T, S and the cell's pressure matches the hindcast's monthly pH (`dic_from_pH`,
+  `carbonate_from_pH_series` in bgc_data.jl). Build test job 11805 (2 ranks, 2019-02-01, env mpi05_bgc_cmems, sandbox
+  copy `Models/NESandbox_bgc_ph`): DIC 233–2167 mmol/m³ on the first day, domain DIC/Alk 0.895, no cell without a
+  solution. DIC inherits any error of the salinity alkalinity almost one for one.
+- The reader (NumericalEarth fe421393, local branch `copernicus-bgc`) is not on the fork's `everything` yet, so
+  `mpi05_bgc` cannot use it; runs with MAB_BGC_DATA=copernicus use `JENV=/t0/workdir/enrique/mpi05_bgc_cmems`.
 
 ## Practical notes
 
