@@ -146,11 +146,57 @@ uᵢ, vᵢ and the net ocean fluxes τˣ, τʸ, Jᵀ, Jˢ, Jʷ):
 | full EVP, no ice advection, 2 × 1 | – | ocean T 7.0e-6, uᵢ 1.5e-8, vᵢ 1.2e-7 | – |
 | noice, 2 × 1 | exact | exact | – |
 
-EVP notes (not fixed): with the ℵ halo fixed, the 1 × 2 EVP case is exact. The 2 × 1 one still differs: small ice
+EVP notes (cause found, see "EVP 2 × 1 fix" below): with the ℵ halo fixed, the 1 × 2 EVP case is exact. The 2 × 1 one still differs: small ice
 velocity differences at the x rank edge from the first step (1-step: uᵢ 1e-8, vᵢ 3e-8, ocean v 2e-6), and, with
 WENO ice advection, a large one (0.19 m/s) on the north-wall row next to the rank edge, (43, 40). Likely candidates are
 the EVP substep halo handling in x (`only_local_halos` fills with the 2·substeps + 3 halo) and the ice advection at
 the wall/rank-edge corner. The 483-cell halo issue above still stands.
+
+### EVP 2 × 1 fix (2026-10-15, side session; triton `runs/seaice/evp2x1`, env `mpi05_icefix4`)
+
+Cause: the ice–ocean drag coefficient of the coupled model's first step. On a distributed grid ClimaSeaIce's
+split-explicit solver puts the ice velocities on a halo-extended grid (2·substeps + 3), so `materialize_stress` turns the
+`SemiImplicitStress` ocean velocities (`uₑ`, `vₑ` = NumericalEarth's surface `SSU`, `SSV`) into extended *copies*,
+refreshed (interior + halos) only inside `time_step_momentum!`. Serially they are the live ocean fields.
+NumericalEarth's `_compute_sea_ice_ocean_stress!` evaluates the drag with that same object, `λ = ρ Cᴰ |Δu|` with
+`ℑxyᶜᶠᵃ(uₑ)` / `ℑxyᶠᶜᵃ(vₑ)`, so at build time and at the first step (before any ice momentum step) it read the copies'
+unfilled halos at the rank edge. τ = −λ uᵢ is still exact there (uᵢ = 0 at start), which is why NSTEPS=0 compared
+exact; the ocean uses λ implicitly, so its first step went wrong at i = 40/41 (η 3.8e-7, v 2e-6) and everything else
+(ice 1e-8 after one step, uᵢ 0.19 at (43, 40) after 4 with WENO ice advection) followed from that. Found with the
+per-substep probe (`EVPPROBE=true`, `restart_test_harness/evp_substep_probe.jl`): the ice fields entered the first
+momentum step exact to 1e-16 while η already differed in the interior at the rank edge.
+
+Fix, NumericalEarth fork branch `sea-ice-ocean-drag-halos` (95c5e374, on top of `sea-ice-halos`, not PR'd): one call,
+`update_external_stress!(τₛ, grid)` before `_compute_sea_ice_ocean_stress!` in `compute_sea_ice_ocean_fluxes!`
+(a no-op serially). It also covers a script that sets the ocean velocities after building the sea ice (the copies'
+interiors are taken at construction). It applies to `sea-ice-halos-frazil` as well (cherry-pick).
+
+Results (`immersed`, DT 300, 8 EVP substeps unless noted):
+
+| case | `sea-ice-halos` | `sea-ice-ocean-drag-halos` |
+|---|---|---|
+| EVP 2 × 1, 1 step | ocean v 2e-6, uᵢ 1e-8 | exact |
+| EVP 2 × 1, 4 steps (WENO ice advection) | uᵢ 0.19 at (43, 40) | exact |
+| EVP 1 × 2, 4 steps | exact | exact |
+| EVP 2 × 1, no ice advection, 4 steps | uᵢ 1.5e-8, vᵢ 1.2e-7 | exact |
+| nodynamics 2 × 1, 4 steps | exact | exact |
+| EVP 2 × 1, 16 substeps, 8 steps | – | exact |
+
+("exact" = 0.00e+00 in all 14 compared fields; jobs: probe 11808–11812, verification `verify_11814.log` on the fork
+branch with no probe. Probe with `EVPFIX=stress` alone, on `sea-ice-halos`, was already exact.)
+
+Second, latent issue (no effect here): `fill_halo_regions!` fills a Bounded side's halo over the interior range of the
+other direction only (`fill_halo_size` → `size(grid, loc)`), and neither `only_local_halos` nor the 2 × 1 corner
+exchange (no corner neighbours) fills the corner blocks of the extended halo (rank-edge halo columns × wall halo rows).
+During the substeps those cells keep stale values: the probe saw u off by 0.38 m/s at (40, 0), next to the rank edge
+on the south wall. Here it never reaches the interior (the ice at the walls is marginal and takes the free drift,
+which reads no stresses), but with real ice against a domain wall next to a rank edge it would feed the wall-row
+stresses. `EVPFIX=corners` in the probe fills those blocks (Bounded-side kernels rebuilt with indices spanning the
+connected direction's whole parent range) for u, v every substep and h, ℵ, σ, the external fields once per step;
+with `stress` it stays exact. A ClimaSeaIce fix along those lines is not made; worth a test with ice at a wall first.
+
+Still open: why 1 × 2 was exact on `sea-ice-halos` (λʸ at rank 1's first v face reads `uₑ` at j = 0, the same kind
+of halo); not chased. The 483-cell halo issue (default 240 substeps) is unchanged.
 
 Regression test idea (NumericalEarth `test/test_distributed_utils.jl`, which already has `rank_window`): build
 `OceanSeaIceModel(ocean_simulation(grid), sea_ice_simulation(grid, ocean; dynamics = nothing); atmosphere)` with a
