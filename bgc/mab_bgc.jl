@@ -932,11 +932,16 @@ biogeochemistry = LOBSTER(grid; surface_PAR = PARFromShortwave(grid), oxygen = O
 const BGC_TRACERS = required_biogeochemical_tracers(biogeochemistry)
 say("biogeochemistry: LOBSTER + O₂ + carbonate system, tracers $(join(BGC_TRACERS, ", ")), seafloor remineralisation $(BGC_SEDIMENT ? "on" : "off")")
 
-# Every BGC tracer is advected with the bounds-preserving WENO-7, kept non-negative; T and S keep the scheme set above
+# Every BGC tracer is advected with the bounds-preserving WENO-7, within [0, 1e5] unless MAB_BGC_BOUNDS gives its interval
+# (e.g. "NO₃:0:30,O₂:50:450"); T and S keep the scheme set above
+const BGC_BOUNDS = Dict(Symbol(a) => (parse(Float64, b), parse(Float64, c)) for (a, b, c) in
+                        split.(filter(!isempty, split(get(ENV, "MAB_BGC_BOUNDS", ""), ",")), ":"))
+issubset(keys(BGC_BOUNDS), BGC_TRACERS) || error("MAB_BGC_BOUNDS: not BGC tracers: $(join(setdiff(keys(BGC_BOUNDS), BGC_TRACERS), ", "))")
 physical_advection = haskey(advection_kw, :tracer_advection) ? advection_kw.tracer_advection :
                      WENO(order = 7, time_discretization = AdaptiveVerticallyImplicitDiscretization(cfl = 0.5))
 physical_advection isa NamedTuple || (physical_advection = (T = physical_advection, S = physical_advection))
-bgc_advection = NamedTuple(name => WENO(order = 7, bounds = (0.0, 1e5)) for name in BGC_TRACERS)
+bgc_advection = NamedTuple(name => WENO(order = 7, bounds = get(BGC_BOUNDS, name, (0.0, 1e5))) for name in BGC_TRACERS)
+isempty(BGC_BOUNDS) || say("BGC tracer bounds: " * join(["$name in [$lo, $hi]" for (name, (lo, hi)) in BGC_BOUNDS], ", "))
 advection_kw = merge(advection_kw, (; tracer_advection = merge(physical_advection, bgc_advection)))
 # Quadratic bottom drag coefficient (NumericalEarth's default 0.003, semi-implicit)
 const BOTTOM_DRAG = parse(Float64, get(ENV, "MAB_BOTTOM_DRAG", "0.003"))
