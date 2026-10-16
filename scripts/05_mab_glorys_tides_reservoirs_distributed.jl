@@ -1132,6 +1132,11 @@ if STAGE == "steps"
             end
             ao = model.interfaces.atmosphere_ocean_interface.fluxes
             f["ao_x_p"] = Array(parent(ao.x_momentum)); f["ao_x_halo"] = collect(Oceananigans.Grids.halo_size(ao.x_momentum.grid))
+            if SEA_ICE
+                im = model.sea_ice.model
+                f["h"] = Array(interior(im.ice_thickness)); f["aleph"] = Array(interior(im.ice_concentration))
+                f["ui"] = Array(interior(im.velocities.u)); f["vi"] = Array(interior(im.velocities.v))
+            end
             # the surface flux each prognostic field receives (top boundary condition), where it is a field
             for (name, fld) in (("u", oc.velocities.u), ("v", oc.velocities.v), ("T", oc.tracers.T), ("S", oc.tracers.S))
                 q = fld.boundary_conditions.top.condition

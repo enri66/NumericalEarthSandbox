@@ -222,6 +222,34 @@ Still open:
   needs porting to local indices for a distributed GSL run.
 - Not chased: why 1 × 2 was exact before the drag fix (λʸ at rank 1's first v face reads `uₑ` at j = 0).
 
+### EVP at production substep counts: per-substep halo exchange (2026-10-16; env `mpi05_icefix7`)
+
+ClimaSeaIce fork branch `substep-halo-exchange` (bf463e9, on `extended-halo-corners`, not PR'd): `SplitExplicitSolver(grid;
+substeps, extend_halos = false)`, mirroring Oceananigans' `SplitExplicitFreeSurface(; extend_halos)`. The velocities
+stay on the grid's own halos (no 2·substeps + 3 extension), the velocity kernels run on the interior, and after every u
+and v update `fill_halo_regions!` exchanges the halos and the corner pass of `extended-halo-corners` refills the
+walls' halos across the connected halos (needed on 2-D partitions: no corner neighbour beyond a wall). Default
+`extend_halos = true` is unchanged. The stress kernels already cover the halos, so nothing else changes.
+
+Harness (`EVP_EXTEND=false`, `xch_11826/7/8.log`), all exact: 2 × 1, 1 × 2, 2 × 2 (centred patch); 2 × 1 and 2 × 2
+wallice; 2 × 2 supercooled; **240 substeps 2 × 1 and 2 × 2 wallice** (impossible with extended halos: 483 cells);
+the extended mode (default) is still exact (2 × 1 wallice, 2 × 2 supercooled).
+
+Script 05 now runs sea ice on several ranks (ice sponge on local indices; `extend_halos = false` when nranks > 1; needs
+`mpi05_icefix7` or equivalent) — `scripts/gsl_mpi.sbatch`, sandbox copy on triton `Models/NESandbox_icempi`, runs in
+`runs/seaice/gslmpi`. One GSL day from 2013-12-01, s per simulated hour: 1 rank × 48 threads 40.7; 2 ranks × 24
+threads on one node 38.7; 2 nodes × 48 threads 38.2 (no speed-up: likely the 3 × 240 EVP substeps per step, small
+latency-bound kernels now each with a halo exchange; not profiled).
+
+**New blocker: the GSL ocean is not layout-exact on its own.** `MAB_STAGE=steps`, 1 vs 2 ranks, `compare_layouts.jl`
+(ice fields added to the dumps): with `MAB_SEA_ICE=false` the ocean differs from step 1 — η 1.2e-6 at (139, 120), u
+2.9e-5 at the rank edge (139/140) and v 3.8e-5 at (203, 1, 32), on the southern open boundary away from the rank
+edge; 4 % of cells after one step. With sea ice the ocean differences are identical and the ice is still exact (no ice
+in the first 12 steps on Dec 1), so it is not the sea ice. After one day (`compare_rank_outputs.jl`, sea ice on): ocean
+u 1.9e-3, T 2.2e-3 near (141, 9); ice velocities 0.83 m/s (the ice follows the ocean). The MAB ocean was exact; what
+differs here (southern boundary across the Bay of Fundy mask, the closed estuary, the largest-basin filter, tides on
+444 boundary nodes, …) is the next thing to chase.
+
 Regression test idea (NumericalEarth `test/test_distributed_utils.jl`, which already has `rank_window`): build
 `OceanSeaIceModel(ocean_simulation(grid), sea_ice_simulation(grid, ocean; dynamics = nothing); atmosphere)` with a
 constant-wind `PrescribedAtmosphere` on a small LatitudeLongitudeGrid, serially and on `Partition(2, 1)` and
