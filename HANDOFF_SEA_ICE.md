@@ -185,3 +185,10 @@ Both on enri66/NumericalEarth.jl, branched from upstream `main` (526d401c), each
   `set!(model, T = 0)` → BoundsError). `prepare_halo_fill!` cannot fix it: on Oceananigans `main` the Field halo fill
   adapts the boundary conditions (`convert_to_device`) before the hook runs, so the window must be updated on the host
   series in `fill_halo_regions!(::Field, clock, …)` before that conversion. Script 05 is safe with Clamp as it is.
+- Clocked case fixed on enri66/Oceananigans.jl `clocked-halo-fill-fts-window` (b7788078, from CliMA `main` 5309b1c6,
+  no PR): `fill_halo_regions!(::Field, clock, …)` and the DistributedField method call a new host hook
+  `update_boundary_time_series!(bcs, clock, …)` (OutputReaders: `update_field_time_series!` on every series in the
+  boundary conditions) before `convert_to_device`. Test "A clocked halo fill moves the window of a series held by a
+  boundary condition" in `test/simulation/output_readers.jl`: BoundsError on `main`, passes after; all 11239
+  output_readers tests pass on CPU with `--check-bounds=yes`; one-rank `Distributed` checked by hand. On GPU each clocked
+  fill of such a field copies the series' times to the CPU (partly-in-memory series only); not measured.
