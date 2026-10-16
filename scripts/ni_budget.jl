@@ -64,12 +64,12 @@ for name in ("OSSM", "PMUO", "PMCO", "CNSM")
     @printf("\n== %s: common grid %g-%g m every %g m (ADCP well sampled to %g m; run columns to %s m)\n", name, grid[1], grid[end],
             Δz, deep_adcp, join(round.(Int, floors), "/"))
     E = Dict(label => [integral(KE[label], layer_rows(grid, l), Δz) for l in layers] for label in first.(sources))
-    println("   depth-integrated near-inertial energy (10⁻³ m³/s²) by layer: record mean / Dorian / mid-Sep / 17 Oct")
+    println("   depth-integrated near-inertial energy (10⁻³ m³/s²) by layer: record mean / ", join(first.(STORMS), " / "))
     for (i, l) in enumerate(layers)
         @printf("   %4d-%-4d m", l[1], l[2])
         for label in first.(sources)
             e = E[label][i]
-            @printf("  %s %5.2f/%5.2f/%5.2f/%5.2f", label, 1e3 * mean(e), [1e3 * mean(e[window(a, b)]) for (_, a, b) in STORMS]...)
+            print("  ", label, " ", join([@sprintf("%5.2f", 1e3 * x) for x in (mean(e), [mean(e[window(a, b)]) for (_, a, b) in STORMS]...)], "/"))
         end
         println()
     end
