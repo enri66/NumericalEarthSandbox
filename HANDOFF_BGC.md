@@ -92,8 +92,21 @@ simulation, with realistic initial, boundary and river inputs, and validate it a
   placeholders): ran to the end in ~15 h (~36 s per model hour after a 55-min first step). Bloom: P up to 4.0 mmol N/m³
   over Nantucket Shoals (70.5°W 41.5°N, uniform over the shallow column), Z up to 2.0, surface O₂ up to 392. Open
   problem: isolated bottom-cell hot spots, e.g. the bottom cell at 67.12°W 40.63°N has NO₃ 34.7 and O₂ 71 against 9 and
-  218 in the cell above (9 of 465 222 wet cells with NO₃ > 25, 3 with O₂ < 150; NH₄ max 1.8, also a bottom cell). Likely
-  the seafloor remineralisation going into thin partial bottom cells; not yet confirmed. NO₃ dips to −0.01 in places.
+  218 in the cell above (9 of 465 222 wet cells with NO₃ > 25, 3 with O₂ < 150; NH₄ max 1.8, also a bottom cell).
+  NO₃ dips to −0.01 in places.
+- Bottom-cell hot spots, diagnosed 2026-10-16 (scripts in triton `runs/bgc/`: hotspots_feb19.jl, hotspots_vs_dz.jl,
+  hotspot_budget.jl, hotspot_ts.jl; bottom-cell heights from the `<TAG>_bottom_rank<r>.jld2` files mab_bgc.jl now
+  writes): 60 bottom cells end with NO₃ > 5 mmol/m³ above the cell over them, mostly on the shelf break and upper slope.
+  - Not a rank-edge error: they sit at every column position within the ranks.
+  - Not thin partial cells: hot and non-hot bottom cells have the same height ÷ level distribution (median 0.33 vs 0.41;
+    0.50 % of the cells thinner than 0.3 of their level are hot, 0.47 % of the thicker ones).
+  - Not the sediment or sinking detritus: in the worst column (105, 78; 226 m deep, 5.9 m bottom cell) the column holds
+    2–13 mmol N/m² of detritus and the bottom-cell NH₄ stays ~0.3, while the bottom cell gains ~190 mmol N/m² as NO₃
+    between days 39 and 48; the column inventory rises by ~750 mmol N/m² (lateral inflow of slope water).
+  - Values outside every source: NO₃ 37 and O₂ 44 (initial and boundary data: NO₃ ≤ 25, O₂ ≥ ~130), so advection
+    creates new extrema there. The same bottom cell is 2–3 °C colder than the cell 6 m above while the vertical velocity
+    at its top face is −5 to −11 m/day. This is the bottom-cell advection problem of PRODUCTION_CONFIG.md, visible
+    because the BGC tracers are only bounded to [0, 1e5]; T and S stay inside their loose physical bounds.
 - NumericalEarth fix: the OceanBioME extension's gas exchange read `sea_ice.model.ice_concentration`, which fails with
   `OceanOnlyModel` (the sea ice is `FreezingLimitedOceanTemperature`); it now calls `sea_ice_concentration`. On the
   fork's `everything` branch as d9dfcbf6; not proposed upstream yet.
