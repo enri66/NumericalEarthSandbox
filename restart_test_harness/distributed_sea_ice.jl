@@ -43,6 +43,8 @@ const HALOCHECK = get(ENV, "HALOCHECK", "false") == "true"
 # On a distributed grid the split-explicit EVP solver widens the halos to 2 substeps + 3 cells, which must fit in each
 # rank's slab; NumericalEarth's default with an RK3 ocean is 240 substeps (483-cell halos)
 const EVP_SUBSTEPS = parse(Int, get(ENV, "EVP_SUBSTEPS", "8"))
+# EVP_EXTEND=false exchanges the EVP velocity halos every substep instead (needs ClimaSeaIce's `extend_halos` keyword)
+const EVP_EXTEND = get(ENV, "EVP_EXTEND", "true") == "true"
 # Barotropic substeps, the same for both builds: NumericalEarth's default free surface fixes them from an estimated
 # maximum Δt on a distributed grid but adapts them to Δt serially (9 are enough here at DT = 300 s)
 const BAROTROPIC_SUBSTEPS = parse(Int, get(ENV, "BAROTROPIC_SUBSTEPS", "20"))
@@ -99,7 +101,8 @@ function build(grid)
     else
         kw = has(:noadvection) ? (;) : (; advection = WENO(order = 7))
         dynamics = has(:nodynamics) ? nothing :
-                   sea_ice_dynamics(grid, ocean; solver = SplitExplicitSolver(grid; substeps = EVP_SUBSTEPS))
+                   sea_ice_dynamics(grid, ocean; solver = EVP_EXTEND ? SplitExplicitSolver(grid; substeps = EVP_SUBSTEPS) :
+                                                SplitExplicitSolver(grid; substeps = EVP_SUBSTEPS, extend_halos = false))
         sea_ice = sea_ice_simulation(grid, ocean; Δt = DT, dynamics, kw...)
         set!(sea_ice.model, h = hᵢ, ℵ = ℵᵢ)
         FILLICE && foreach(fill_halo_regions!, (sea_ice.model.ice_thickness, sea_ice.model.ice_concentration))
@@ -126,8 +129,8 @@ cpu_arch = cpu_architecture(arch)
 ocean_fields(o) = (u = o.velocities.u, v = o.velocities.v, η = o.free_surface.displacement, T = o.tracers.T, S = o.tracers.S)
 fields(o, ::Nothing) = ocean_fields(o)
 fields(o, i) = merge(ocean_fields(o), (h = i.ice_thickness, ℵ = i.ice_concentration, uᵢ = i.velocities.u, vᵢ = i.velocities.v))
-rank == 0 && @printf("FEATURES = %-30s NSTEPS = %d  DT = %g  EVP substeps %d  partition %d × %d\n",
-                     join(sort(collect(string.(FEATURES))), ","), NSTEPS, DT, EVP_SUBSTEPS, PX, PY)
+rank == 0 && @printf("FEATURES = %-30s NSTEPS = %d  DT = %g  EVP substeps %d%s  partition %d × %d\n",
+                     join(sort(collect(string.(FEATURES))), ","), NSTEPS, DT, EVP_SUBSTEPS, EVP_EXTEND ? "" : " (exchanged)", PX, PY)
 flux_fields(J) = (τˣ = J.u, τʸ = J.v, Jᵀ = J.T, Jˢ = J.S, Jʷ = J.η)
 fp, fs = merge(fields(op, ip), flux_fields(Jp)), merge(fields(os, is), flux_fields(Js))
 for name in keys(fp)

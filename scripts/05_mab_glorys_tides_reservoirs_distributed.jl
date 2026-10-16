@@ -1003,7 +1003,10 @@ set_from_frame!(ocean.model.free_surface.displacement, fts_η[1])
 # the rate 1 / MAB_ICE_SPONGE_TAU (days) at the boundary times the ocean sponge's mask (MAB_SPONGE_WIDTH cells wide).
 # GLORYS marks ice-free ocean as missing rather than 0, so its ice is read from the cached files directly with missing
 # values as no ice (NumericalEarth's Metadata path inpaints them, which would spread ice over open water).
-# One rank only: on a distributed grid the coupled ocean differs from serial at the rank edges (HANDOFF_SEA_ICE.md).
+# On several ranks the EVP exchanges its velocity halos every substep (ClimaSeaIce's `extend_halos = false`; the
+# default extended halos, 2 substeps + 3 cells, do not fit a regional partition). That, and agreement with one rank,
+# needs the fork branches in HANDOFF_SEA_ICE.md (NumericalEarth sea-ice-halos-frazil-drag, ClimaSeaIce
+# substep-halo-exchange).
 const SEA_ICE = get(ENV, "MAB_SEA_ICE", "false") == "true"
 const ICE_SUBSTEPS = parse(Int, get(ENV, "MAB_ICE_SUBSTEPS", "240"))
 const ICE_SPONGE_TAU = parse(Float64, get(ENV, "MAB_ICE_SPONGE_TAU", "1")) * days
@@ -1026,20 +1029,22 @@ function glorys_ice_on_grid(name, date)
 end
 
 if SEA_ICE
-    nranks == 1 || error("MAB_SEA_ICE runs on one rank only (the distributed sea-ice coupling is not exact yet)")
-    ice_dynamics = sea_ice_dynamics(grid, ocean; solver = SplitExplicitSolver(grid; substeps = ICE_SUBSTEPS))
+    ice_solver = nranks == 1 ? SplitExplicitSolver(grid; substeps = ICE_SUBSTEPS) :
+                               SplitExplicitSolver(grid; substeps = ICE_SUBSTEPS, extend_halos = false)
+    ice_dynamics = sea_ice_dynamics(grid, ocean; solver = ice_solver)
     sea_ice = sea_ice_simulation(grid, ocean; Δt = Δt_baroclinic, dynamics = ice_dynamics, advection = WENO(order = 7))
 
-    # the GLORYS targets on the sponge cells, one column per GLORYS day
-    const ice_sponge_cells = [(i, j) for i in 1:Nλ, j in 1:Nφ if sponge.μᶜ[i, j] > 0 && bh[i, j] < 0]
-    const ice_sponge_μ = [sponge.μᶜ[i, j] for (i, j) in ice_sponge_cells]
+    # the GLORYS targets on this rank's sponge cells (local indices), one column per GLORYS day
+    const ice_sponge_cells = [(i, j) for i in 1:size(grid, 1), j in 1:size(grid, 2)
+                              if sponge.μᶜ[i + I_OFF, j + J_OFF] > 0 && bh[i + I_OFF, j + J_OFF] < 0]
+    const ice_sponge_μ = [sponge.μᶜ[i + I_OFF, j + J_OFF] for (i, j) in ice_sponge_cells]
     const ice_dates = collect(Date(start_date):Day(1):Date(stop_date))
     const ice_times = [Float64(Dates.value(DateTime(d) + Hour(12) - start_date)) / 1000 for d in ice_dates]   # daily means at noon
     function ice_targets(name)
         target = zeros(length(ice_sponge_cells), length(ice_dates))
         for (n, d) in enumerate(ice_dates)
             frame_data = glorys_ice_on_grid(name, d)
-            target[:, n] .= [frame_data[i, j] for (i, j) in ice_sponge_cells]
+            target[:, n] .= [frame_data[i + I_OFF, j + J_OFF] for (i, j) in ice_sponge_cells]
         end
         return target
     end
@@ -1061,7 +1066,7 @@ if SEA_ICE
         Oceananigans.BoundaryConditions.fill_halo_regions!((h, ℵ))
         return nothing
     end
-    say(@sprintf("sea ice: ClimaSeaIce, EVP with %d substeps, WENO-7 advection, no ice at the start; GLORYS ice restored on %d sponge cells (τ = %.2f days at the boundary)",
+    say(@sprintf("sea ice: ClimaSeaIce, EVP with %d substeps, WENO-7 advection, no ice at the start; GLORYS ice restored on %d sponge cells on rank 0 (τ = %.2f days at the boundary)",
                  ICE_SUBSTEPS, length(ice_sponge_cells), ICE_SPONGE_TAU / days))
 end
 

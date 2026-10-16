@@ -14,8 +14,8 @@ IFS=";" read -ra cases <<< "${CASES:-2 2 1 8 immersed+nodynamics 1 300}"
 for c in "${cases[@]}"; do
     read -r NP PX PY EVP_SUBSTEPS FEATURES NSTEPS DT <<< "$c"
     FEATURES=${FEATURES//+/,}; export PX PY EVP_SUBSTEPS FEATURES NSTEPS DT
-    echo "=== case: $c  FILLICE=${FILLICE:-false} EVPPROBE=${EVPPROBE:-false} EVPFIX=${EVPFIX:-none}"
+    echo "=== case: $c  FILLICE=${FILLICE:-false} EVPPROBE=${EVPPROBE:-false} EVPFIX=${EVPFIX:-none} EVP_EXTEND=${EVP_EXTEND:-true}"
     mpirun -np $NP --bind-to none -x LD_LIBRARY_PATH -x PATH -x JULIA_DEPOT_PATH -x MPITRAMPOLINE_LIB -x MPITRAMPOLINE_MPIEXEC -x JULIA_PKG_GC_AUTO \
-           -x PX -x PY -x EVP_SUBSTEPS -x FEATURES -x NSTEPS -x DT -x FILLICE -x SHOWDIFF -x HALOCHECK -x EVPPROBE -x EVPFIX \
+           -x PX -x PY -x EVP_SUBSTEPS -x FEATURES -x NSTEPS -x DT -x FILLICE -x SHOWDIFF -x HALOCHECK -x EVPPROBE -x EVPFIX -x EVP_EXTEND \
            julia -t 4 --project=$JENV $HARNESS 2>&1 | grep -v -e "HostCPUFeatures" -e "CPU info is out-of-date" -e "incorrect CPU feature" -e "mpool.c" -e "incorrect CPU name" -e "Will continue"
 done
