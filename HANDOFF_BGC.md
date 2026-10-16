@@ -107,6 +107,11 @@ simulation, with realistic initial, boundary and river inputs, and validate it a
     creates new extrema there. The same bottom cell is 2–3 °C colder than the cell 6 m above while the vertical velocity
     at its top face is −5 to −11 m/day. This is the bottom-cell advection problem of PRODUCTION_CONFIG.md, visible
     because the BGC tracers are only bounded to [0, 1e5]; T and S stay inside their loose physical bounds.
+  - Data-range bounds (restart `bgc_feb19_bnd`, job 11847: day 35 checkpoint of bgc_feb19 to day 50 with
+    MAB_BGC_BOUNDS="NO₃:0:30,O₂:50:450"; triton `runs/bgc/compare_bnd.jl`): on the shared days 39–47 the NO₃ maximum stays
+    ≤ 24 (37 unbounded) and the O₂ minimum ≥ 84 (59), with domain totals within 4e-5 of the unbounded run. But the hot
+    cells remain (39 vs 43 on day 47) and the worst bottom cell still drifts (NO₃ 5 → 23, O₂ 247 → 84): the bounds keep
+    the values possible, they do not stop the bottom cell from decoupling from the water above.
 - NumericalEarth fix: the OceanBioME extension's gas exchange read `sea_ice.model.ice_concentration`, which fails with
   `OceanOnlyModel` (the sea ice is `FreezingLimitedOceanTemperature`); it now calls `sea_ice_concentration`. On the
   fork's `everything` branch as d9dfcbf6; not proposed upstream yet.
