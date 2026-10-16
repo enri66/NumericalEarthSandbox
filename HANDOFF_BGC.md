@@ -88,6 +88,12 @@ simulation, with realistic initial, boundary and river inputs, and validate it a
   not mass conserving): check the nitrogen budget before trusting bottom fluxes.
 - The output files hold the halos (7 cells): strip them before joining ranks.
 - Feb–Mar 2019 forcing for the MAB is now on triton (built from the antares archives by the converter session).
+- Prototype `runs/bgc/bgc_feb19` (job 11794; 1/12°, 4 triton24 ranks, 2019-02-01 → 04-01, WOA + carbonate
+  placeholders): ran to the end in ~15 h (~36 s per model hour after a 55-min first step). Bloom: P up to 4.0 mmol N/m³
+  over Nantucket Shoals (70.5°W 41.5°N, uniform over the shallow column), Z up to 2.0, surface O₂ up to 392. Open
+  problem: isolated bottom-cell hot spots, e.g. the bottom cell at 67.12°W 40.63°N has NO₃ 34.7 and O₂ 71 against 9 and
+  218 in the cell above (9 of 465 222 wet cells with NO₃ > 25, 3 with O₂ < 150; NH₄ max 1.8, also a bottom cell). Likely
+  the seafloor remineralisation going into thin partial bottom cells; not yet confirmed. NO₃ dips to −0.01 in places.
 - NumericalEarth fix: the OceanBioME extension's gas exchange read `sea_ice.model.ice_concentration`, which fails with
   `OceanOnlyModel` (the sea ice is `FreezingLimitedOceanTemperature`); it now calls `sea_ice_concentration`. On the
   fork's `everything` branch as d9dfcbf6; not proposed upstream yet.
