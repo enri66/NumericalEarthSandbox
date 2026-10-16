@@ -18,9 +18,9 @@ include(joinpath(@__DIR__, "ooi_common.jl"))
 const TAGS   = filter(!isempty, split(get(ENV, "MAB_TAGS", ""), ","))
 # analysis window (NI_START, NI_END), within every source's record
 const AXIS   = collect(DateTime(get(ENV, "NI_START", "2019-08-30")):Hour(1):DateTime(get(ENV, "NI_END", "2019-10-27")))
-const STORMS = (("Dorian", DateTime(2019, 9, 6), DateTime(2019, 9, 13)),
-                ("mid-Sep", DateTime(2019, 9, 14), DateTime(2019, 9, 21)),
-                ("17 Oct", DateTime(2019, 10, 17), DateTime(2019, 10, 24)))
+# storm windows, NI_STORMS = "label|start|end;…" (end exclusive)
+const STORMS = Tuple(let (l, a, b) = split(w, "|"); (String(l), DateTime(a), DateTime(b)) end
+                     for w in split(get(ENV, "NI_STORMS", "Dorian|2019-09-06|2019-09-13;mid-Sep|2019-09-14|2019-09-21;17 Oct|2019-10-17|2019-10-24"), ";"))
 const LAYERS = Dict(8.0 => ((40, 100), (100, 200), (200, 1000)),     # slope moorings (8 m grid)
                     4.0 => ((12, 40), (40, 80), (80, 1000)))         # shelf moorings (4 m grid)
 const OUTDIR = get(ENV, "NI_OUTDIR", OOI_DIR)

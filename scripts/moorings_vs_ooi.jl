@@ -11,6 +11,7 @@
 # Usage:
 #   MAB_TAG=/t0/workdir/enrique/runs/catke_fall/moor OOI_DIR=/t0/workdir/enrique/Data/OOI/pioneer \
 #       julia --project=. scripts/moorings_vs_ooi.jl
+# MAB_STORMS: storm windows as "label|start|end;…" (default: Dorian and 17-23 Oct 2019)
 using CairoMakie
 include(joinpath(@__DIR__, "mab_analysis_common.jl"))
 const FFTW = Base.loaded_modules[only(id for id in keys(Base.loaded_modules) if id.name == "FFTW")]
@@ -19,8 +20,9 @@ const TAG     = get(ENV, "MAB_TAG", "moor")
 const PREFIX  = run_prefix(TAG)
 const OOI_DIR = get(ENV, "OOI_DIR", joinpath(homedir(), "Data", "OOI", "pioneer"))
 const BAND    = (16.0, 22.0)                                   # near-inertial periods (hours)
-const STORMS  = (("Dorian, 6-12 Sep", DateTime(2019, 9, 6), DateTime(2019, 9, 13)),
-                 ("17-23 Oct", DateTime(2019, 10, 17), DateTime(2019, 10, 24)))
+# storm windows, "label|start|end;…" (end exclusive)
+const STORMS  = Tuple(let (l, a, b) = split(w, "|"); (String(l), DateTime(a), DateTime(b)) end
+                      for w in split(get(ENV, "MAB_STORMS", "Dorian, 6-12 Sep|2019-09-06|2019-09-13;17-23 Oct|2019-10-17|2019-10-24"), ";"))
 
 # name in the run => (ERDDAP dataset, vertical grid spacing, top of the usable ADCP range)
 const MOORINGS = Dict("OSSM" => ("ooi-cp04ossm-mfd35-01-adcpsj000", 8.0, 40.0),
