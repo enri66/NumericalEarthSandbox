@@ -1065,6 +1065,27 @@ radiation  = ERA5PrescribedRadiation(;  start_date, end_date = stop_date, region
                                       dir = joinpath(DATA_DIR, "era5"), ERA5_KW...)
 # the river discharge reaches the ocean only with MAB_RIVERS (the land is also built for MAB_SSS_RIVER_MASK's mouth positions)
 model = OceanOnlyModel(ocean; atmosphere, radiation, land = RIVERS ? land : nothing)
+
+# BGC: the bottom cell of each of this rank's columns at t = 0 (its level, its height, and the full height of that level),
+# written to <TAG>_bottom_rank<r>.jld2 for diagnosing values in the bottom cells (the sediment feeds them)
+try
+    g = ocean.model.grid
+    Nxl, Nyl, Nzl = size(g)
+    k_bottom = zeros(Int, Nxl, Nyl); Δz_bottom = zeros(Nxl, Nyl); Δz_level = zeros(Nxl, Nyl)
+    for j in 1:Nyl, i in 1:Nxl
+        k = findfirst(k -> !inactive_cell(i, j, k, g), 1:Nzl)
+        isnothing(k) && continue
+        k_bottom[i, j]  = k
+        Δz_bottom[i, j] = Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, g)
+        Δz_level[i, j]  = Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, g.underlying_grid)
+    end
+    jldopen("$(TAG)_bottom_rank$(rank).jld2", "w") do f
+        f["I_OFF"] = I_OFF; f["J_OFF"] = J_OFF
+        f["k_bottom"] = k_bottom; f["Δz_bottom"] = Δz_bottom; f["Δz_level"] = Δz_level
+    end
+catch e
+    say("warning: the bottom-cell file was not written: $(sprint(showerror, e))")
+end
 simulation = Simulation(model; Δt = Δt_baroclinic, stop_time = sim_days * days, stop_iteration = STOP_ITERATION)
 
 # MAB_STAGE=model: everything is built and initialised; report the initial state and stop before time stepping.
