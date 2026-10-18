@@ -356,7 +356,11 @@ per rank and 2 of 3 bounds partitions fail; with the fixes 12/12 and 3/3 pass.
 GSL results (`MAB_STAGE=steps`, `compare_layouts.jl`, 1 rank × 48 threads vs 2 ranks × 24, every dumped field
 0.0e+00): production 48 steps (`j0`), production + sea ice 24 steps (`j2`), the stripped configuration 12 steps
 (`j1`; on the old env it had a 3.6e-15 difference in one cell at (138, 8, 42), not attributed, gone with the
-fixes). Before: η 1.2e-6, u 2.9e-5, v 3.8e-5 after one step (`g0`).
+fixes). Before: η 1.2e-6, u 2.9e-5, v 3.8e-5 after one step (`g0`). One day with sea ice (`MAB_STAGE=run`, `scripts/gsl_mpi.sbatch`
+with `JENV=mpi05_gslx SANDBOX=Models/NESandbox_gslx`, tags `x1`/`x2n1` in `runs/seaice/gslmpi`,
+`compare_rank_outputs.jl`): every output exact, ocean and ice (ice up to 7 cm, ice velocities to 1.3 m/s); the same
+comparison before had ocean u 1.9e-3 and ice velocities 0.83 m/s. The MAB region with the production settings is exact
+too on the fixed stack (`m2`, 12 steps).
 
 Reduced reproducer: `restart_test_harness/distributed_features.jl` feature `zstar` (`FEATURES=latlon,teos10,zstar`,
 2 ranks, 2 steps: u 2.4e-8 before, exact after; also with immersed, rk3, open, oblique on 2×1, 1×2, 2×2).
@@ -364,5 +368,5 @@ Reduced reproducer: `restart_test_harness/distributed_features.jl` feature `zsta
 `zstar_step_probe.jl` (PROBE=1) takes a step one operation at a time on both models, `PROBE_AT=i:j:k` prints the
 u tendency's inputs. Script 05's step dumps include the z* grid fields when `MAB_ZSTAR=true`.
 
-Not done: MAB region re-check on the fixed stack (expected exact, same code paths); 2-D partitions of GSL; the
-cost of the extra synchronization (one wait per `update_state!`, after the diagnostics that overlap it).
+Not done: 2-D partitions of GSL; the cost of the extra synchronization (one wait per `update_state!`, after the
+diagnostics that overlap it).
