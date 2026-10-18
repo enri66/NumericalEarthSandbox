@@ -582,7 +582,9 @@ end
     tb = c.table
     sg = s + c.off
     1 <= sg <= length(tb.floor) || return u
-    Oceananigans.Grids.znode(1, 1, k, grid, Center(), Center(), Center()) > tb.floor[sg] || return u
+    # the resting level, as in the table: with z-star, znode moves with η, and the column (1, 1) is a different one on
+    # every rank (before 2026-10-18 it was znode(1, 1, k), which broke the agreement between layouts)
+    zc_src[k] > tb.floor[sg] || return u
     t = isnothing(clock) ? 0.0 : clock.time
     n1, n2, w = frame(tb.times, t)
     Uint = (1 - w) * tb.Uint[n1, sg] + w * tb.Uint[n2, sg]
@@ -1118,6 +1120,14 @@ if STAGE == "steps"
             for (name, fld) in (("eta", fs.displacement), ("U", fs.barotropic_velocities.U), ("V", fs.barotropic_velocities.V),
                                 ("u", oc.velocities.u), ("v", oc.velocities.v), ("T", oc.tracers.T))
                 f[name * "_p"] = Array(parent(fld)); f[name * "_halo"] = collect(Oceananigans.Grids.halo_size(fld.grid))
+            end
+            # with z-star, the grid's free surface, stretching factors and their time derivative, with halos
+            if ZSTAR
+                zc = oc.grid.z
+                for name in (:ηⁿ, :σᶜᶜⁿ, :σᶠᶜⁿ, :σᶜᶠⁿ, :σᶠᶠⁿ, :σᶜᶜ⁻, :∂t_σ)
+                    f["z" * string(name) * "_p"] = Array(parent(getproperty(zc, name)))
+                    f["z" * string(name) * "_halo"] = collect(Oceananigans.Grids.halo_size(oc.grid))
+                end
             end
             # the net surface fluxes handed to the ocean, and the air-sea momentum flux with its halo
             nf = model.interfaces.net_fluxes.ocean

@@ -315,3 +315,54 @@ T,S,u,v sponge; rivers off so far).
   Melville and the coast) vs GLORYS 0.4k; Gulf 1.8k (upper estuary) vs 0.1k; ice up to 3 m in Lake Melville by Dec 6
   (dynamic piling?). GLORYS may miss Lake Melville; needs satellite products (OSI SAF / NSIDC, Canadian Ice Service).
 - Full winter running: triton job 11793, tag `ice12_winter` (Dec 1 2013 – Jun 1 2014, 6-hourly ice output).
+
+## GSL ocean layout-exact (2026-10-18, side session; triton `runs/gslx`, env `mpi05_gslx`)
+
+The "new blocker" above is solved: GSL production (z*, partial cells, bounded WENO-7, SSS restoring, T,S,u,v sponge,
+tides, open boundaries) is bit-exact between 1 and 2 ranks. It was not GSL-specific: the MAB region with the same
+settings also differed (`m1`, rank edge 70/71). The MAB exactness of 2026-10-08 predates z*, partial cells and the
+bounded WENO. Three causes, found by bisecting the settings (`g1`–`g7`: only z* and the bounds reproduced) and then
+with the reduced harness:
+
+1. **z* pressure gradient (Oceananigans, upstream bug).** On a z* grid `∂xᶠᶜᶜ` is the chain rule
+   `∂x|r − ∂x z · ∂z ϕ`, and `∂z pHY′` averaged to the face reads the pressure's top and bottom halos of the
+   neighbouring column. At a rank edge that column is in the x-halo: the pressure is computed there (surface kernel
+   parameters, recomputed in the buffer pass) but `fill_halo_regions!(pHY′; only_local_halos = true)` fills the
+   vertical halos over the interior columns only. Serially that column is interior, so its halos are filled. Effect:
+   u tendency at the first/last face of each rank (η 1e-6 after one step). Fix: `update_hydrostatic_pressure!`
+   also launches the field's own bottom/top fill over the same columns.
+2. **Bounds-preserving WENO limiter (Oceananigans, upstream bug).** `update_state!` starts the tracer halo
+   exchange asynchronously and computes the limiters (`update_advection!`) before it completes; their
+   reconstructions reach across the rank edge (4.7e-11 after one step). Fix: `synchronize_communication!(tracers)`
+   before `update_advection!` (a later synchronization re-copies the same buffers, so it is harmless).
+3. **Script 05 `ConsistentNormalFlow` (sandbox).** The test "is level k above the boundary floor" used
+   `znode(1, 1, k, grid, …)`, the local cell (1, 1); with z* that node moves with η and is a different column on
+   each rank (v 3.8e-5 at the south boundary (203, 1, 32), u at the east face). Now `zc_src[k]`, the resting level
+   the table is built from (also a correctness fix on one rank: the threshold no longer follows η at one corner).
+
+Fork branches (enri66/Oceananigans.jl, not PR'd, need Enri's OK):
+- `zstar-pressure-vertical-halos` (aa08329d6, from main 5309b1c66): fix 1 + test "Distributed z-star hydrostatic
+  pressure" in `test/mpi/hydrostatic_model.jl` (z* box, buoyancy varying in x and y, x4/y4/2×2 vs serial).
+- `bounds-limiter-tracer-halos` (f6ddb06d1, from main): fix 2 + test "Distributed bounds-preserving tracer
+  advection" (WENO-5 bounded front advected across the rank edges).
+- `everything-gsl-exact` (1d906c244) = `everything` (7956c9727) + both, for the runs; triton checkout
+  `dev/Oceananigans-gslx`, env `mpi05_gslx` (NumericalEarth `sea-ice-halos-frazil-drag`, ClimaSeaIce
+  `substep-halo-exchange`). `everything` itself and the production envs are unchanged.
+
+Tests on triton (`restart_test_harness/zstar_pressure_mpi_test.jl`, `bounds_limiter_mpi_test.jl` run the test
+blocks outside Oceananigans' test environment, envs `zt_main`/`zt_fix`/`zt_bnd`): on main 7–9 of 12 z* checks fail
+per rank and 2 of 3 bounds partitions fail; with the fixes 12/12 and 3/3 pass.
+
+GSL results (`MAB_STAGE=steps`, `compare_layouts.jl`, 1 rank × 48 threads vs 2 ranks × 24, every dumped field
+0.0e+00): production 48 steps (`j0`), production + sea ice 24 steps (`j2`), the stripped configuration 12 steps
+(`j1`; on the old env it had a 3.6e-15 difference in one cell at (138, 8, 42), not attributed, gone with the
+fixes). Before: η 1.2e-6, u 2.9e-5, v 3.8e-5 after one step (`g0`).
+
+Reduced reproducer: `restart_test_harness/distributed_features.jl` feature `zstar` (`FEATURES=latlon,teos10,zstar`,
+2 ranks, 2 steps: u 2.4e-8 before, exact after; also with immersed, rk3, open, oblique on 2×1, 1×2, 2×2).
+`SHOWDIFF` now also compares internal fields (pressure, tendencies, transport velocities, z* fields) with halos;
+`zstar_step_probe.jl` (PROBE=1) takes a step one operation at a time on both models, `PROBE_AT=i:j:k` prints the
+u tendency's inputs. Script 05's step dumps include the z* grid fields when `MAB_ZSTAR=true`.
+
+Not done: MAB region re-check on the fixed stack (expected exact, same code paths); 2-D partitions of GSL; the
+cost of the extra synchronization (one wait per `update_state!`, after the diagnostics that overlap it).
