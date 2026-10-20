@@ -108,6 +108,156 @@ Findings:
   estimated maximum Δt while the serial default adapts them; give both builds an explicit `SplitExplicitFreeSurface`
   (script 05 already does).
 
+### Rank-edge fix (2026-10-15, side session; triton `runs/seaice/icefix`, envs `mpi05_icefix`, `mpi05_icefix2`)
+
+Cause of the ocean differences: `set!(sea_ice.model, h = …, ℵ = …)` fills the interior only, and the coupled model
+computes its first interface fluxes when it is built. `_assemble_net_ocean_fluxes!` averages ℵ to the u/v faces
+(`ℑxᶠᵃᵃ(ℵ)`, `ℑyᵃᶠᵃ(ℵ)`) for the (1 − ℵ)-weighted wind stress, so the first face of each rank read a zero ℵ halo
+(serially, the neighbour's ℵ). Only the first coupled step's stress was wrong (τˣ 5.6e-9 at face 41), but it grew to
+T 2.5e-2 °C in 4 steps. After the first ice step, ClimaSeaIce's own `update_state!` fills the halos.
+Harness control `FILLICE=true` (fill h, ℵ halos after `set!`) made everything exact before any NumericalEarth change.
+
+NumericalEarth fork branches (from `everything` d9dfcbf6, not PR'd):
+- `sea-ice-halos` (8ced8eab), the fix:
+  - ef05b7b0 the sea-ice exchanger's `initialize!` calls `update_state!(sea_ice.model)` (fills the ice halos);
+  - 8ced8eab `above_freezing_ocean_temperature!` refills the T halos after clipping the initial T to the freezing
+    point (control without it, with a supercooled patch: initial τˣ 5.4e-8 on 2 × 1, τʸ 4.9e-8 on 1 × 2).
+- `sea-ice-halos-frazil` (200414de) = the above + `update_state!(ocean.model)` after the frazil adjustment, for both
+  ClimaSeaIce and `FreezingLimitedOceanTemperature`. The frazil clip changes T after the ocean's `update_state!`;
+  the distributed RK step recomputes the diffusivities/pressure next to rank edges after its halo exchange (from the
+  clipped T), while the rest of the domain and the serial run keep those of the unclipped T. A halo fill alone is not
+  enough (1e-8 left). Cost: a second ocean `update_state!` per coupled step. It also runs the boundary-condition
+  updates a second time per step, so check the oblique-radiation stored state before using it in script 05. Enri to decide.
+- `distributed-sea-ice-halos` (d4bd4eae) is superseded (halo-only frazil fill); delete it.
+
+Results (4 steps of 300 s, immersed, `distributed_sea_ice.jl` at 94aef96; "exact" = 0.00e+00 in u, v, η, T, S, h, ℵ,
+uᵢ, vᵢ and the net ocean fluxes τˣ, τʸ, Jᵀ, Jˢ, Jʷ):
+
+| case | `everything` | `sea-ice-halos` | `sea-ice-halos-frazil` |
+|---|---|---|---|
+| nodynamics, 2 × 1 | T 2.5e-2, u 8e-4 | exact | exact |
+| nodynamics, 1 × 2 | T 1.8e-2, v 5.9e-4 | exact | – |
+| nodynamics + supercooled, at build (NSTEPS=0), 2 × 1 / 1 × 2 | – | exact / exact | – |
+| nodynamics + supercooled, 2 × 1 | – | T 6.5e-4, u 2.6e-6 (frazil every step) | exact |
+| nodynamics + supercooled, 1 × 2 | – | – | exact |
+| noice + supercooled, 2 × 1 | – | T 8.7e-9 (run with ef05b7b0 alone) | exact |
+| full EVP (8 substeps), 1 × 2 | T 1.1e-2, uᵢ 0.26 | exact (ice velocities too) | exact |
+| full EVP, 2 × 1 | T 2.5e-2, uᵢ 0.31 | ocean T 7.0e-6, h 2.9e-6, uᵢ 0.19 of 0.41 at (43, 40) | – |
+| full EVP, no ice advection, 2 × 1 | – | ocean T 7.0e-6, uᵢ 1.5e-8, vᵢ 1.2e-7 | – |
+| noice, 2 × 1 | exact | exact | – |
+
+EVP notes (cause found, see "EVP 2 × 1 fix" below): with the ℵ halo fixed, the 1 × 2 EVP case is exact. The 2 × 1 one still differs: small ice
+velocity differences at the x rank edge from the first step (1-step: uᵢ 1e-8, vᵢ 3e-8, ocean v 2e-6), and, with
+WENO ice advection, a large one (0.19 m/s) on the north-wall row next to the rank edge, (43, 40). Likely candidates are
+the EVP substep halo handling in x (`only_local_halos` fills with the 2·substeps + 3 halo) and the ice advection at
+the wall/rank-edge corner. The 483-cell halo issue above still stands.
+
+### EVP 2 × 1 fix (2026-10-15, side session; triton `runs/seaice/evp2x1`, env `mpi05_icefix4`)
+
+Cause: the ice–ocean drag coefficient of the coupled model's first step. On a distributed grid ClimaSeaIce's
+split-explicit solver puts the ice velocities on a halo-extended grid (2·substeps + 3), so `materialize_stress` turns the
+`SemiImplicitStress` ocean velocities (`uₑ`, `vₑ` = NumericalEarth's surface `SSU`, `SSV`) into extended *copies*,
+refreshed (interior + halos) only inside `time_step_momentum!`. Serially they are the live ocean fields.
+NumericalEarth's `_compute_sea_ice_ocean_stress!` evaluates the drag with that same object, `λ = ρ Cᴰ |Δu|` with
+`ℑxyᶜᶠᵃ(uₑ)` / `ℑxyᶠᶜᵃ(vₑ)`, so at build time and at the first step (before any ice momentum step) it read the copies'
+unfilled halos at the rank edge. τ = −λ uᵢ is still exact there (uᵢ = 0 at start), which is why NSTEPS=0 compared
+exact; the ocean uses λ implicitly, so its first step went wrong at i = 40/41 (η 3.8e-7, v 2e-6) and everything else
+(ice 1e-8 after one step, uᵢ 0.19 at (43, 40) after 4 with WENO ice advection) followed from that. Found with the
+per-substep probe (`EVPPROBE=true`, `restart_test_harness/evp_substep_probe.jl`): the ice fields entered the first
+momentum step exact to 1e-16 while η already differed in the interior at the rank edge.
+
+Fix, NumericalEarth fork branch `sea-ice-ocean-drag-halos` (95c5e374, on top of `sea-ice-halos`, not PR'd): one call,
+`update_external_stress!(τₛ, grid)` before `_compute_sea_ice_ocean_stress!` in `compute_sea_ice_ocean_fluxes!`
+(a no-op serially). It also covers a script that sets the ocean velocities after building the sea ice (the copies'
+interiors are taken at construction). It applies to `sea-ice-halos-frazil` as well (cherry-pick).
+
+Results (`immersed`, DT 300, 8 EVP substeps unless noted):
+
+| case | `sea-ice-halos` | `sea-ice-ocean-drag-halos` |
+|---|---|---|
+| EVP 2 × 1, 1 step | ocean v 2e-6, uᵢ 1e-8 | exact |
+| EVP 2 × 1, 4 steps (WENO ice advection) | uᵢ 0.19 at (43, 40) | exact |
+| EVP 1 × 2, 4 steps | exact | exact |
+| EVP 2 × 1, no ice advection, 4 steps | uᵢ 1.5e-8, vᵢ 1.2e-7 | exact |
+| nodynamics 2 × 1, 4 steps | exact | exact |
+| EVP 2 × 1, 16 substeps, 8 steps | – | exact |
+
+("exact" = 0.00e+00 in all 14 compared fields; jobs: probe 11808–11812, verification `verify_11814.log` on the fork
+branch with no probe. Probe with `EVPFIX=stress` alone, on `sea-ice-halos`, was already exact.)
+
+### Wall/rank-edge corner fix (2026-10-15, same side session; envs `mpi05_icefix5`, `mpi05_icefix6`)
+
+2 × 2 with the centred patch was exact on `sea-ice-ocean-drag-halos`, but a new harness feature `wallice` (the ice
+patch centred on the south wall at the x rank edge, pressed against it by the southward wind) was not: 2 × 1 and
+2 × 2 both uᵢ 6.2e-3, h 2.9e-4 at (40, 1) after 4 steps (identical, so the 2 × 2 interior corner adds nothing).
+
+Cause (probe, `wall_11817.log`): `fill_halo_regions!` fills a wall's (Bounded side's) halo along the interior of the
+other direction only (`fill_halo_size` → `size(grid, loc)`); neither `only_local_halos` nor the corner exchange (no
+corner neighbour beyond a wall) fills the corner blocks where a wall halo meets the extended rank-edge halo. The
+substeps update u, v in the halo columns, but those corner cells keep the start-of-step values: after substep 1,
+u(41, 0) on rank 0 is stale, so at substep 2 σ₁₁ at the wall-halo centre (40, 0) is off by 196 and ζᶠᶠ at the wall node
+(40, 1); the wall-row shear stress then moves u(40, 1) (7e-7 at substep 2, uᵢ 9e-4 after one step). With the ice at the
+walls marginal (centred patch) the free drift takes over and reads no stresses, which is why it did not show before.
+
+Fix, ClimaSeaIce fork enri66/ClimaSeaIce.jl branch `extended-halo-corners` (81b196b, from v0.5.10, not PR'd):
+`time_step_momentum!` fills u, v with boundary-condition kernels rebuilt (`construct_boundary_conditions_kernels`)
+with indices spanning the connected sides' halos, so the wall fills also cover those columns (true domain corners
+are left as serially). u, v only; h, ℵ, σ and the external fields needed nothing.
+
+Results, all exact (0.00e+00 in the 14 fields), `mpi05_icefix5` = NumericalEarth `sea-ice-ocean-drag-halos` +
+ClimaSeaIce `extended-halo-corners` (`csi_11820.log`, `csi_11821.log`):
+2 × 1 wallice 1 and 4 steps; 2 × 2 wallice 4 steps; 2 × 1, 1 × 2, 2 × 2 centred patch 4 steps; 2 × 1 wallice with 16
+substeps, 8 steps.
+
+Frazil: NumericalEarth branch `sea-ice-halos-frazil-drag` (39047c81) = `sea-ice-halos-frazil` + the drag fix;
+`mpi05_icefix6` = that + the ClimaSeaIce branch (`frz_11823.log`, `frz_11824.log`):
+EVP + supercooled 2 × 1 and 2 × 2, EVP + supercooled + wallice 2 × 1, nodynamics + supercooled 2 × 2, 4 steps: all
+exact. This stack is the full fix set.
+
+Still open:
+- The 483-cell halo issue (default 240 substeps) is unchanged: distributed EVP at production settings needs
+  per-substep halo exchange in ClimaSeaIce or far fewer substeps.
+- `sea-ice-halos-frazil`'s second ocean `update_state!` per step (cost; oblique-radiation stored state unchecked).
+- Script 05's GLORYS ice sponge uses global indices (one rank only); it fills the halos after restoring, so it only
+  needs porting to local indices for a distributed GSL run.
+- Not chased: why 1 × 2 was exact before the drag fix (λʸ at rank 1's first v face reads `uₑ` at j = 0).
+
+### EVP at production substep counts: per-substep halo exchange (2026-10-16; env `mpi05_icefix7`)
+
+ClimaSeaIce fork branch `substep-halo-exchange` (bf463e9, on `extended-halo-corners`, not PR'd): `SplitExplicitSolver(grid;
+substeps, extend_halos = false)`, mirroring Oceananigans' `SplitExplicitFreeSurface(; extend_halos)`. The velocities
+stay on the grid's own halos (no 2·substeps + 3 extension), the velocity kernels run on the interior, and after every u
+and v update `fill_halo_regions!` exchanges the halos and the corner pass of `extended-halo-corners` refills the
+walls' halos across the connected halos (needed on 2-D partitions: no corner neighbour beyond a wall). Default
+`extend_halos = true` is unchanged. The stress kernels already cover the halos, so nothing else changes.
+
+Harness (`EVP_EXTEND=false`, `xch_11826/7/8.log`), all exact: 2 × 1, 1 × 2, 2 × 2 (centred patch); 2 × 1 and 2 × 2
+wallice; 2 × 2 supercooled; **240 substeps 2 × 1 and 2 × 2 wallice** (impossible with extended halos: 483 cells);
+the extended mode (default) is still exact (2 × 1 wallice, 2 × 2 supercooled).
+
+Script 05 now runs sea ice on several ranks (ice sponge on local indices; `extend_halos = false` when nranks > 1; needs
+`mpi05_icefix7` or equivalent) — `scripts/gsl_mpi.sbatch`, sandbox copy on triton `Models/NESandbox_icempi`, runs in
+`runs/seaice/gslmpi`. One GSL day from 2013-12-01, s per simulated hour: 1 rank × 48 threads 40.7; 2 ranks × 24
+threads on one node 38.7; 2 nodes × 48 threads 38.2 (no speed-up: likely the 3 × 240 EVP substeps per step, small
+latency-bound kernels now each with a halo exchange; not profiled).
+
+**New blocker: the GSL ocean is not layout-exact on its own.** `MAB_STAGE=steps`, 1 vs 2 ranks, `compare_layouts.jl`
+(ice fields added to the dumps): with `MAB_SEA_ICE=false` the ocean differs from step 1 — η 1.2e-6 at (139, 120), u
+2.9e-5 at the rank edge (139/140) and v 3.8e-5 at (203, 1, 32), on the southern open boundary away from the rank
+edge; 4 % of cells after one step. With sea ice the ocean differences are identical and the ice is still exact (no ice
+in the first 12 steps on Dec 1), so it is not the sea ice. After one day (`compare_rank_outputs.jl`, sea ice on): ocean
+u 1.9e-3, T 2.2e-3 near (141, 9); ice velocities 0.83 m/s (the ice follows the ocean). The MAB ocean was exact; what
+differs here (southern boundary across the Bay of Fundy mask, the closed estuary, the largest-basin filter, tides on
+444 boundary nodes, …) is the next thing to chase.
+
+Regression test idea (NumericalEarth `test/test_distributed_utils.jl`, which already has `rank_window`): build
+`OceanSeaIceModel(ocean_simulation(grid), sea_ice_simulation(grid, ocean; dynamics = nothing); atmosphere)` with a
+constant-wind `PrescribedAtmosphere` on a small LatitudeLongitudeGrid, serially and on `Partition(2, 1)` and
+`Partition(1, 2)`; `set!(sea_ice.model, ℵ = patch)` with the patch crossing the rank edge; compare
+`interior(coupled.interfaces.net_fluxes.ocean.u)` (and `.v`) with the serial window, no time step needed. It fails on
+`everything` (first face of the second rank) and passes on `sea-ice-halos`. Same test with an initial T below freezing
+across the edge covers the clip refill.
+
 ## Suggested plan
 
 1. Pick the region and a winter period with ice growth (check GLORYS `siconc`).
@@ -165,3 +315,58 @@ T,S,u,v sponge; rivers off so far).
   Melville and the coast) vs GLORYS 0.4k; Gulf 1.8k (upper estuary) vs 0.1k; ice up to 3 m in Lake Melville by Dec 6
   (dynamic piling?). GLORYS may miss Lake Melville; needs satellite products (OSI SAF / NSIDC, Canadian Ice Service).
 - Full winter running: triton job 11793, tag `ice12_winter` (Dec 1 2013 – Jun 1 2014, 6-hourly ice output).
+
+## GSL ocean layout-exact (2026-10-18, side session; triton `runs/gslx`, env `mpi05_gslx`)
+
+The "new blocker" above is solved: GSL production (z*, partial cells, bounded WENO-7, SSS restoring, T,S,u,v sponge,
+tides, open boundaries) is bit-exact between 1 and 2 ranks. It was not GSL-specific: the MAB region with the same
+settings also differed (`m1`, rank edge 70/71). The MAB exactness of 2026-10-08 predates z*, partial cells and the
+bounded WENO. Three causes, found by bisecting the settings (`g1`–`g7`: only z* and the bounds reproduced) and then
+with the reduced harness:
+
+1. **z* pressure gradient (Oceananigans, upstream bug).** On a z* grid `∂xᶠᶜᶜ` is the chain rule
+   `∂x|r − ∂x z · ∂z ϕ`, and `∂z pHY′` averaged to the face reads the pressure's top and bottom halos of the
+   neighbouring column. At a rank edge that column is in the x-halo: the pressure is computed there (surface kernel
+   parameters, recomputed in the buffer pass) but `fill_halo_regions!(pHY′; only_local_halos = true)` fills the
+   vertical halos over the interior columns only. Serially that column is interior, so its halos are filled. Effect:
+   u tendency at the first/last face of each rank (η 1e-6 after one step). Fix: `update_hydrostatic_pressure!`
+   also launches the field's own bottom/top fill over the same columns.
+2. **Bounds-preserving WENO limiter (Oceananigans, upstream bug).** `update_state!` starts the tracer halo
+   exchange asynchronously and computes the limiters (`update_advection!`) before it completes; their
+   reconstructions reach across the rank edge (4.7e-11 after one step). Fix: `synchronize_communication!(tracers)`
+   before `update_advection!` (a later synchronization re-copies the same buffers, so it is harmless).
+3. **Script 05 `ConsistentNormalFlow` (sandbox).** The test "is level k above the boundary floor" used
+   `znode(1, 1, k, grid, …)`, the local cell (1, 1); with z* that node moves with η and is a different column on
+   each rank (v 3.8e-5 at the south boundary (203, 1, 32), u at the east face). Now `zc_src[k]`, the resting level
+   the table is built from (also a correctness fix on one rank: the threshold no longer follows η at one corner).
+
+Fork branches (enri66/Oceananigans.jl, not PR'd, need Enri's OK):
+- `zstar-pressure-vertical-halos` (aa08329d6, from main 5309b1c66): fix 1 + test "Distributed z-star hydrostatic
+  pressure" in `test/mpi/hydrostatic_model.jl` (z* box, buoyancy varying in x and y, x4/y4/2×2 vs serial).
+- `bounds-limiter-tracer-halos` (f6ddb06d1, from main): fix 2 + test "Distributed bounds-preserving tracer
+  advection" (WENO-5 bounded front advected across the rank edges).
+- `everything-gsl-exact` (1d906c244) = `everything` (7956c9727) + both, for the runs; triton checkout
+  `dev/Oceananigans-gslx`, env `mpi05_gslx` (NumericalEarth `sea-ice-halos-frazil-drag`, ClimaSeaIce
+  `substep-halo-exchange`). `everything` itself and the production envs are unchanged.
+
+Tests on triton (`restart_test_harness/zstar_pressure_mpi_test.jl`, `bounds_limiter_mpi_test.jl` run the test
+blocks outside Oceananigans' test environment, envs `zt_main`/`zt_fix`/`zt_bnd`): on main 7–9 of 12 z* checks fail
+per rank and 2 of 3 bounds partitions fail; with the fixes 12/12 and 3/3 pass.
+
+GSL results (`MAB_STAGE=steps`, `compare_layouts.jl`, 1 rank × 48 threads vs 2 ranks × 24, every dumped field
+0.0e+00): production 48 steps (`j0`), production + sea ice 24 steps (`j2`), the stripped configuration 12 steps
+(`j1`; on the old env it had a 3.6e-15 difference in one cell at (138, 8, 42), not attributed, gone with the
+fixes). Before: η 1.2e-6, u 2.9e-5, v 3.8e-5 after one step (`g0`). One day with sea ice (`MAB_STAGE=run`, `scripts/gsl_mpi.sbatch`
+with `JENV=mpi05_gslx SANDBOX=Models/NESandbox_gslx`, tags `x1`/`x2n1` in `runs/seaice/gslmpi`,
+`compare_rank_outputs.jl`): every output exact, ocean and ice (ice up to 7 cm, ice velocities to 1.3 m/s); the same
+comparison before had ocean u 1.9e-3 and ice velocities 0.83 m/s. The MAB region with the production settings is exact
+too on the fixed stack (`m2`, 12 steps).
+
+Reduced reproducer: `restart_test_harness/distributed_features.jl` feature `zstar` (`FEATURES=latlon,teos10,zstar`,
+2 ranks, 2 steps: u 2.4e-8 before, exact after; also with immersed, rk3, open, oblique on 2×1, 1×2, 2×2).
+`SHOWDIFF` now also compares internal fields (pressure, tendencies, transport velocities, z* fields) with halos;
+`zstar_step_probe.jl` (PROBE=1) takes a step one operation at a time on both models, `PROBE_AT=i:j:k` prints the
+u tendency's inputs. Script 05's step dumps include the z* grid fields when `MAB_ZSTAR=true`.
+
+Not done: 2-D partitions of GSL; the cost of the extra synchronization (one wait per `update_state!`, after the
+diagnostics that overlap it).

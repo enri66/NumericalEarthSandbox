@@ -5,7 +5,8 @@
 # drag on the bottom and immersed boundaries, whose implicit coefficient reads the other velocity component), mabgrid
 # (latitude-longitude bounds on multiples of 1/12 degree, which are not exact binary fractions, as in the MAB runs),
 # cooling (a surface heat loss varying in x and y, so that CATKE's averaged surface buoyancy flux is not zero), oblique
-# (with open: ObliqueRadiation on the normal v and the tangential u at the south and north boundaries). Without features the
+# (with open: ObliqueRadiation on the normal v and the tangential u at the south and north boundaries), zstar (a z-star
+# vertical coordinate, MutableVerticalDiscretization). Without features the
 # model is the plain closed box of split_explicit_open_y_distributed.jl.
 #
 #   FEATURES=latlon,immersed,teos10 julia --project=<env> launch_mpi.jl 2 distributed_features.jl
@@ -27,7 +28,7 @@ const NSTEPS = parse(Int, get(ENV, "NSTEPS", "2"))
 
 function make_grid(arch)
     sz = (parse(Int, get(ENV, "NX", "40")), parse(Int, get(ENV, "NY", "20")), 8)
-    z = (-1000, 0)
+    z = has(:zstar) ? MutableVerticalDiscretization(collect(range(-1000, 0, length = 9))) : (-1000, 0)
     underlying = has(:latlon) ?
         LatitudeLongitudeGrid(arch; size = sz, z, halo = (7, 7, 7),
                               longitude = has(:mabgrid) ? (-76, -76 + 40 / 12) : (-74, -70),
@@ -121,6 +122,56 @@ function build(grid)
     return model
 end
 
+# SHOWDIFF: also compare the model's internal fields (halos included) cell by cell with the serial model at the same
+# whole-domain index, reporting the worst cell among this rank's own cells and among its halo cells that lie inside the
+# serial domain
+function deep_compare(mp, ms, grid)
+    z(m, n) = m.grid.z isa MutableVerticalDiscretization ? getproperty(m.grid.z, n) : nothing
+    fs(m) = m.free_surface
+    entries = Any[("pHY′", m -> m.pressure.pHY′), ("w", m -> m.velocities.w),
+                  ("ũ", m -> m.transport_velocities.u), ("ṽ", m -> m.transport_velocities.v), ("w̃", m -> m.transport_velocities.w),
+                  ("Gu", m -> m.timestepper.Gⁿ.u), ("Gv", m -> m.timestepper.Gⁿ.v),
+                  ("η", m -> fs(m).displacement), ("U", m -> fs(m).barotropic_velocities.U), ("V", m -> fs(m).barotropic_velocities.V),
+                  ("Ũ", m -> fs(m).filtered_state.Ũ), ("Ṽ", m -> fs(m).filtered_state.Ṽ),
+                  ("u", m -> m.velocities.u), ("v", m -> m.velocities.v),
+                  ("GU", m -> get(m.timestepper.Gⁿ, :U, nothing)), ("GV", m -> get(m.timestepper.Gⁿ, :V, nothing))]
+    for n in keys(mp.tracers)
+        push!(entries, (string(n), m -> m.tracers[n]), ("G" * string(n), m -> m.timestepper.Gⁿ[n]))
+    end
+    for n in (:ηⁿ, :σᶜᶜⁿ, :σᶠᶜⁿ, :σᶜᶠⁿ, :σᶠᶠⁿ, :σᶜᶜ⁻, :∂t_σ)
+        push!(entries, ("z." * string(n), m -> z(m, n)))
+    end
+    ri, rj, _ = Oceananigans.architecture(grid).local_index
+    ox, oy = (ri - 1) * size(grid, 1), (rj - 1) * size(grid, 2)
+    nx, ny = size(grid, 1), size(grid, 2)
+    Nx, Ny = nx * PX, ny * PY
+    for (label, get) in entries
+        a, b = get(mp), get(ms)
+        (isnothing(a) || isnothing(b)) && continue
+        A = a isa Oceananigans.Fields.AbstractField ? a.data : a
+        B = b isa Oceananigans.Fields.AbstractField ? b.data : b
+        own, xhalo, corner = (0.0, ()), (0.0, ()), (0.0, ())
+        for k in (length(axes(A, 3)) == 1 ? axes(A, 3) : 1:size(grid, 3)), j in axes(A, 2), i in axes(A, 1)
+            gi, gj = i + ox, j + oy
+            (gi in axes(B, 1) && gj in axes(B, 2) && k in axes(B, 3)) || continue
+            (1 <= gi <= Nx + 1 && 1 <= gj <= Ny + 1) || continue
+            (-1 <= i <= nx + 2 && -1 <= j <= ny + 2) || continue
+            d = abs(A[i, j, k] - B[gi, gj, k]); isfinite(d) || continue
+            inx, iny = 1 <= i <= nx, 1 <= j <= ny
+            if inx && iny
+                d > own[1] && (own = (d, (i, j, k)))
+            elseif iny
+                d > xhalo[1] && (xhalo = (d, (i, j, k)))
+            else
+                d > corner[1] && (corner = (d, (i, j, k)))
+            end
+        end
+        @printf("     rank %d %-7s own %.2e %-12s xhalo %.2e %-12s y-halo/corner %.2e %s\n", MPI.Comm_rank(MPI.COMM_WORLD), label,
+                own[1], string(own[2]), xhalo[1], string(xhalo[2]), corner[1], string(corner[2]))
+    end
+    flush(stdout)
+end
+
 comm = MPI.COMM_WORLD
 rank = MPI.Comm_rank(comm)
 const PX = parse(Int, get(ENV, "PX", string(MPI.Comm_size(comm))))
@@ -132,7 +183,7 @@ ms = build(make_grid(CPU()))
 cpu_arch = cpu_architecture(arch)
 names = has(:teos10) ? (:u, :v, :η, :T, :S) : (:u, :v, :η)
 rank == 0 && @printf("FEATURES = %-45s NSTEPS = %d  ranks = %d\n", join(sort(collect(string.(FEATURES))), ","), NSTEPS, MPI.Comm_size(comm))
-for name in names
+haskey(ENV, "PROBE") || for name in names
     pick(m) = name == :η ? m.free_surface.displacement : name in (:T, :S) ? getproperty(m.tracers, name) : getproperty(m.velocities, name)
     p = interior(pick(mp)); s = partition(interior(pick(ms)), cpu_arch, size(p))
     d, idx = findmax(abs.(p .- s))
@@ -141,6 +192,9 @@ for name in names
     at = d == Δ && Δ > 0 ? (idx[1] + (ri - 1) * size(grid, 1), idx[2] + (rj - 1) * size(grid, 2), idx[3]) : (0, 0, 0)
     at = (MPI.Allreduce(at[1], max, comm), MPI.Allreduce(at[2], max, comm), MPI.Allreduce(at[3], max, comm))
     rank == 0 && @printf("   %s: max|Δ| = %.2e of max %.2e%s\n", name, Δ, M, Δ > 0 ? " at (i, j, k) = $(at)" : "")
+    if haskey(ENV, "SHOWDIFF") && name == first(names)
+        deep_compare(mp, ms, grid)
+    end
     if haskey(ENV, "SHOWDIFF")
         bad = findall(abs.(p .- s) .> 1e-12)
         if !isempty(bad)
