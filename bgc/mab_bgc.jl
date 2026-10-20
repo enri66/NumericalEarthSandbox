@@ -990,9 +990,49 @@ if MASK_SSS && !isnothing(sss_restoring)
                  r_in, length(mouths), SSS_RIVER_QMIN, r_out, count(<(1), sss_restoring.mask)))
 end
 river_kw = RIVERS ? (; river_routing = land.river_routing, river_mouth_mixing_depth = RIVER_MIXING_DEPTH) : (;)
+
+# ---------------- BGC: river loads (MAB_RIVER_LOADS, default on with rivers) ----------------
+# The river water carries NO₃ and O₂ (freshwater_tracer_content): the tracer content of a cell is Σᵢ cᵢ Jʷᵢ, the
+# concentration times the volume flux of the river water, so it is rescaled every step by the runoff flux of that day.
+# MAB_RIVER_NO3 gives the NO₃ concentration (mmol/m³) of the Hudson, the Delaware and all other rivers, e.g.
+# "Hudson:50,Delaware:50,other:20": a cell takes the concentration of the nearest of the hand-placed mouths within 100 km
+# of it, "other" elsewhere. O₂ is the saturation of fresh water at MAB_RIVER_O2_TEMPERATURE °C. NH₄, DOM, the particles,
+# DIC and Alk enter with zero concentration, as before (zero Alk and DIC matches the salinity-derived Alk and DIC of the
+# placeholders at S = 0).
+const RIVER_LOADS = RIVERS && get(ENV, "MAB_RIVER_LOADS", "true") == "true"
+const RIVER_NO3 = Dict(Symbol(a) => parse(Float64, b) for (a, b) in
+                       split.(filter(!isempty, split(get(ENV, "MAB_RIVER_NO3", "Hudson:50,Delaware:50,other:20"), ",")), ":"))
+const RIVER_O2_TEMPERATURE = parse(Float64, get(ENV, "MAB_RIVER_O2_TEMPERATURE", "5"))
+river_content = (;)
+if RIVER_LOADS
+    haskey(RIVER_NO3, :other) || error("MAB_RIVER_NO3 needs an \"other\" entry")
+    river_λ, river_φ = λnodes(ggrid, Center()), φnodes(ggrid, Center())
+    river_km(λ₁, φ₁, λ₂, φ₂) = 2 * 6371 * asin(sqrt(sind((φ₂ - φ₁) / 2)^2 + cosd(φ₁) * cosd(φ₂) * sind((λ₂ - λ₁) / 2)^2))
+    function river_class(i, j)       # whole-domain cell → the nearest hand-placed mouth within 100 km, or :other
+        best, class = 100.0, :other
+        for m in MAB_EXTRA_MOUTHS
+            d = river_km(river_λ[i], river_φ[j], m.mouth_λ, m.mouth_φ)
+            d < best && ((best, class) = (d, Symbol(m.name)))
+        end
+        return class
+    end
+    river_NO3_concentration = Field{Center, Center, Nothing}(grid)
+    river_O2_concentration  = Field{Center, Center, Nothing}(grid)
+    river_O2 = o2_saturation(RIVER_O2_TEMPERATURE, 0.0)              # µmol/kg ≈ mmol/m³ at 1000 kg/m³
+    for routing in values(land.river_routing), (ti, tj) in zip(Array(routing.target_i), Array(routing.target_j))
+        interior(river_NO3_concentration)[ti, tj, 1] = get(RIVER_NO3, river_class(I_OFF + ti, J_OFF + tj), RIVER_NO3[:other])
+        interior(river_O2_concentration)[ti, tj, 1]  = river_O2
+    end
+    river_content = (; NO₃ = Field{Center, Center, Nothing}(grid), O₂ = Field{Center, Center, Nothing}(grid))
+    classes = [river_class(I_OFF + ti, J_OFF + tj) for routing in values(land.river_routing) for (ti, tj) in zip(Array(routing.target_i), Array(routing.target_j))]
+    say(@sprintf("river loads: NO₃ %s mmol/m³, O₂ %.0f mmol/m³ (fresh water at %.0f °C); this rank's river cells: %s",
+                 join(["$k $v" for (k, v) in RIVER_NO3], ", "), river_O2, RIVER_O2_TEMPERATURE,
+                 join(["$(count(==(c), classes)) $c" for c in unique(classes)], ", ")))
+end
+
 ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw..., advection_kw...,
                          river_kw..., bottom_drag_coefficient = BOTTOM_DRAG, implicit_bottom_drag = IMPLICIT_DRAG,
-                         biogeochemistry)
+                         biogeochemistry, freshwater_tracer_content = river_content)
 
 if CONSISTENT_UBC
     # Built on the whole-domain grid, on every rank, so it does not depend on which boundaries a rank owns.
@@ -1092,6 +1132,20 @@ catch e
     say("warning: the bottom-cell file was not written: $(sprint(showerror, e))")
 end
 simulation = Simulation(model; Δt = Δt_baroclinic, stop_time = sim_days * days, stop_iteration = STOP_ITERATION)
+
+# BGC: the river loads follow the runoff flux of the land component (kg/m²/s, so volume flux = flux / ρ)
+if RIVER_LOADS
+    runoff_flux = model.interfaces.exchanger.land.state.runoff_freshwater_flux
+    ρ_ocean = model.interfaces.ocean_properties.reference_density
+    river_area = [Oceananigans.Operators.Azᶜᶜᶜ(i, j, 1, grid) for i in 1:size(grid, 1), j in 1:size(grid, 2)]
+    function update_river_loads!(sim)
+        interior(river_content.NO₃) .= interior(river_NO3_concentration) .* interior(runoff_flux) ./ ρ_ocean
+        interior(river_content.O₂)  .= interior(river_O2_concentration)  .* interior(runoff_flux) ./ ρ_ocean
+        return nothing
+    end
+    add_callback!(simulation, update_river_loads!, IterationInterval(1))
+    update_river_loads!(simulation)
+end
 
 # MAB_STAGE=model: everything is built and initialised; report the initial state and stop before time stepping.
 if STAGE == "model"
@@ -1220,6 +1274,11 @@ function progress(sim)
     water = interior(S) .> 0
     range_of(c) = (allmin(minimum(interior(c)[water]; init = Inf)), allmax(maximum(interior(c)[water]; init = -Inf)))
     say("                  " * join([@sprintf("%s∈[%.3g,%.4g]", name, range_of(tr[name])...) for name in (:NO₃, :P, :Z, :O₂, :DIC, :Alk)], "  "))
+    if RIVER_LOADS
+        Q = allsum(sum(interior(runoff_flux)[:, :, 1] .* river_area)) / ρ_ocean                  # m³/s
+        L = allsum(sum(interior(river_content.NO₃)[:, :, 1] .* river_area)) / 1000                # mol/s
+        say(@sprintf("                  rivers: Q = %.0f m³/s, NO₃ load = %.1f mol/s (mean %.1f mmol/m³)", Q, L, Q > 0 ? 1000L / Q : 0.0))
+    end
     wall[] = time()
     return nothing
 end

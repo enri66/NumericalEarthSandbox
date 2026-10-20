@@ -48,6 +48,14 @@ const BGC_UNIFORM = let uniform = (NH₄ = 0.05, P = 0.1, Z = 0.05, DOM = 0.5, s
     BGC_DATA == "copernicus" ? Base.structdiff(uniform, NamedTuple{(:P,)}) : uniform
 end
 
+# oxygen solubility (µmol/kg) at temperature T (°C) and salinity S, Garcia & Gordon (1992); validate_bgc.jl has the same
+function o2_saturation(T, S)
+    Ts = log((298.15 - T) / (273.15 + T))
+    lnC = 5.80871 + 3.20291Ts + 4.17887Ts^2 + 5.10006Ts^3 - 0.0986643Ts^4 + 3.80369Ts^5 +
+          S * (-0.00701577 - 0.00770028Ts - 0.0113864Ts^2 - 0.00951519Ts^3) - 2.75915e-7 * S^2
+    return exp(lnC)
+end
+
 # Mid-month times covering the run, in seconds from start_date (the first may be negative)
 function bgc_frame_dates(start_date, stop_date)
     first_month = firstdayofmonth(start_date - Day(15))
