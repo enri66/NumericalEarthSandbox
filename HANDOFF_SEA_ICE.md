@@ -318,6 +318,9 @@ T,S,u,v sponge; rivers off so far).
 
 ## GSL ocean layout-exact (2026-10-18, side session; triton `runs/gslx`, env `mpi05_gslx`)
 
+> Status 2026-10-20: the two Oceananigans fixes below were opened as CliMA/Oceananigans.jl#6291 and #6292 (see
+> `restart_test_harness/pr_drafts_2026-10-16_sea_ice.md`).
+
 The "new blocker" above is solved: GSL production (z*, partial cells, bounded WENO-7, SSS restoring, T,S,u,v sponge,
 tides, open boundaries) is bit-exact between 1 and 2 ranks. It was not GSL-specific: the MAB region with the same
 settings also differed (`m1`, rank edge 70/71). The MAB exactness of 2026-10-08 predates z*, partial cells and the
@@ -429,6 +432,9 @@ Early December 2013 (question from the 10-day test, 10³ km²; CIS on the chart 
   11793 finishes.
 
 ## NumericalEarth fixes for GLORYS ice and the out-of-bounds read (2026-10-16, fork branches, no PRs yet)
+
+> Status 2026-10-20: opened as NumericalEarth#790 (GLORYS ice) and #791 (clockless Interpolated read), and the Oceananigans
+> clocked-halo-fill variant as CliMA/Oceananigans.jl#6293; see the PR drafts file.
 
 Both on enri66/NumericalEarth.jl, branched from upstream `main` (526d401c), each with a test that fails on `main`.
 - `glorys-sea-ice-open-water` (7870435d): GLORYS `retrieve_data` reads missing `siconc`/`sithick` as 0 (ice-free ocean
