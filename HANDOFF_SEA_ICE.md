@@ -370,3 +370,60 @@ u tendency's inputs. Script 05's step dumps include the z* grid fields when `MAB
 
 Not done: 2-D partitions of GSL; the cost of the extra synchronization (one wait per `update_state!`, after the
 diagnostics that overlap it).
+
+## Observed sea ice (2026-10-15, `scripts/sea_ice_obs_vs_model.jl`)
+
+Data on antares `~/Data/sea_ice_obs/<product>` (README.md there: versions, grids, sources, download script), synced to
+triton `/t0/workdir/enrique/Data/sea_ice_obs`. All open access (no account, no licence click-through), 2013-11-25 to
+2014-06-05:
+
+| product | version | grid | use |
+|---|---|---|---|
+| OSI SAF OSI-450-a sea-ice concentration CDR (`osisaf_osi450a_v3`) | v3.0 | 25 km EASE2 north, daily | concentration offshore |
+| NOAA/NSIDC CDR G02202 (`nsidc_g02202_v6`) | v6 (v06r00) | 25 km NSIDC polar stereographic, daily | concentration offshore |
+| Canadian Ice Service regional charts, SIGRID-3, NSIDC G02171 (`cis_g02171/East_Coast`) | v1 | weekly (Mondays) polygons | concentration everywhere incl. Lake Melville, the estuary, fast ice; thickness from stage of development |
+| AWI CryoSat-2/SMOS(+S3) merged thickness (`cs2smos_v300`) | v300 | 12.5 km EASE2, 7-day windows moved daily, Oct-Apr | ice volume |
+
+The CIS Eastern Arctic charts (`cis_g02171/Eastern_Arctic`) lie north of the box; no separate SMOS-only thin-ice
+product for 2013-14 is openly available (CS2SMOS includes it).
+
+The script regrids everything to the 278 × 128 model grid and compares daily area (Σ ℵ A) and extent (ℵ ≥ 0.15) for the
+Gulf, the Labrador side (≥ 51.7°N), Lake Melville (61-58.3°W, 53-54.35°N, part of the Labrador side) and the shelf,
+without the 8-cell sponge band, using the masks of `gsl_ice_vs_glorys.jl`. Model = daily mean of `<tag>_sea_ice_rank0.jld2`.
+On triton: `RUN_TAG=ice12_winter sbatch -p triton24 --exclude=node[38,41] -J iceobs -o .../iceobs_%j.log --export=ALL
+scripts/sea_ice_obs.sbatch` (a few minutes; SANDBOX= a checkout with the script). Output in the run directory:
+`<tag>_ice_obs_vs_model.csv` (daily), `<tag>_ice_obs_vs_model_cis.csv` (chart dates, incl. volumes) and
+`<tag>_ice_obs_maps.jld2` (all fields on the model grid). Choices:
+- Passive microwave has land spill-over: in early December both products show 0.2-0.6 along every Gulf coastline that
+  the charts have ice free. Pixels within ~50 km of land are dropped, so those products cover only 28% (OSI) / 59%
+  (G02202) of the Gulf's water, 70-87% of the Labrador side and shelf, none of Lake Melville; model and GLORYS are summed
+  over the same cells for those columns.
+- CIS: each cell takes the polygon its centre falls in; 9% of the model's water cells (coasts, and much of Lake Melville,
+  which the 1/12° mask draws wider) fall on chart land and take the nearest chart cell within 2 cells. Thickness per
+  stage = WMO mid-range (new 5 cm, grey 12.5, grey-white 22.5, thin FY 50, medium FY 95, thick FY 150 cm), so CIS
+  volumes are rough.
+
+Early December 2013 (question from the 10-day test, 10³ km²; CIS on the chart cells, model = ice12_winter, daily mean):
+
+| | Dec 2 | Dec 9 | Dec 16 | Dec 23 | Dec 30 |
+|---|---|---|---|---|---|
+| Lake Melville: CIS area / GLORYS / model | 1.7 / 0 / 0.2 | 3.2 / 0 / 5.4 | 7.2 / 0 / – | 7.5 / 0 | 8.0 / 0 |
+| Labrador side: CIS / GLORYS / model | 2.6 / 0.3 / 0.4 | 5.1 / 0.4 / 11.8 | 26.0 / 4.0 / – | 41.6 / 15.6 | 65.1 / 26.9 |
+| Gulf: CIS / GLORYS / model | 0.1 / 0 / 0 | 3.7 / 0 / 0.7 | 30.6 / 10.2 / – | 52.2 / 13.1 | 78.1 / 15.9 |
+
+- GLORYS has no ice in Lake Melville at any time in the winter (CIS: ice from Dec 2, the whole lake by mid-December,
+  grey ice 10-15 cm early on, still covered in late May), and far less than CIS on the Labrador coast and in the Gulf
+  through December: GLORYS misses coastal, fast and new ice that the charts map. OSI-450-a and CS2SMOS (unfiltered, see
+  the maps) also show 0.6-0.7 in western Lake Melville on Dec 9. So the model's early Lake Melville / Labrador-coast ice
+  is real, not a model artefact; the model is ahead of CIS (Dec 9: Melville 5.4 vs 3.2, Labrador 11.8 vs 5.1, all
+  of Lake Melville at ℵ ≈ 1 where CIS has 0.7-1 in the west and < 1/10 in the east) and too thick (Melville volume 1.5 km³ vs CIS 0.3, i.e. ~28 cm vs
+  grey ice ~10 cm). The ice sponge restoring toward GLORYS likely removes coastal ice near the north edge in
+  December.
+- Offshore (on the passive-microwave cells) GLORYS agrees well with OSI-450-a and G02202 from late December to April
+  (e.g. Labrador Feb 10: GLORYS 75.6 vs OSI 69.3; shelf Mar 10: 114.8 vs 112.1), as expected if it assimilates them;
+  on the G02202 cells GLORYS has less Gulf ice in February-March (Mar 10: 114 vs 165).
+- Over the CIS cells GLORYS is below the charts all winter (Gulf Feb 10: 134 vs 252; Labrador Mar 17: 99 vs 131),
+  and in spring the charts keep much more ice (May 26 Labrador 51.7 vs 13.7; volume 60 vs 10.5 km³ with the stage
+  thicknesses). CS2SMOS volume is lower than GLORYS mid-winter on its cells (Gulf Feb 24: 64 vs 83 km³).
+- The model columns cover the run so far (ice12_winter had reached ~Dec 13 at the time); rerun the sbatch when job
+  11793 finishes.
