@@ -192,6 +192,22 @@ the OOI Pioneer sensors at CNSM and ISSM (7 m near-surface frame, seafloor node)
   oxygen and nutrient reference, the Copernicus hindcast's own chlorophyll and nitrate against the same observations (to
   separate its bias from the model's), pCO₂.
 
+## River loads (2026-10-20)
+
+`MAB_RIVER_LOADS` (default on with rivers) in `bgc/mab_bgc.jl`: the river water carries NO₃ and O₂ through
+`freshwater_tracer_content`. That field is the flux Σ cᵢ Jʷᵢ (mmol/m²/s), not a concentration, so a callback rescales a
+static concentration map by the runoff flux (`model.interfaces.exchanger.land.state.runoff_freshwater_flux`/ρ) every step.
+A river cell takes the concentration of the nearest hand-placed mouth (Hudson, Delaware) within 100 km, "other" elsewhere.
+- NO₃ (mmol/m³, `MAB_RIVER_NO3`): Hudson 50 (published as "usually > 50 µM", Roland and Cole 1999, via BioNumbers: a
+  secondary summary, lower bound), Delaware 50 and other rivers 20 (both ASSUMED: no values found). Replace them with
+  measured values (USGS NWIS nitrate+nitrite at Trenton and the Hudson gauges; Boyer et al. 2002 for the rest).
+- O₂: fresh-water saturation at 5 °C (399 mmol/m³, `MAB_RIVER_O2_TEMPERATURE`). NH₄, DOM, particles, DIC and Alk: zero
+  (zero Alk and DIC matches the salinity-derived placeholders at S = 0); river alkalinity and DIC would need values.
+- Check at the start of `bgc_feb19_riv` (job 11941): Q = 1875 m³/s, NO₃ load 91.8 mol/s (mean 49.0 mmol/m³); the Hudson
+  (1013 m³/s) and Delaware (775 m³/s) are 95 % of the discharge. Only 6 mouths exceed 20 m³/s and the others total ~87 m³/s:
+  the Connecticut River does not seem to be among the routed rivers in Feb 2019 (not investigated).
+- NO₃ advection bound raised to 60 for this run (river water at 50 would otherwise sit above the limiter's bound).
+
 ## Practical notes
 
 - Sandbox: `~/Dropbox/Models/NumericalEarthSandbox` (Mac) and `/t0/workdir/enrique/Models/NumericalEarthSandbox`
