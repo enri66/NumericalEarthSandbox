@@ -207,6 +207,32 @@ A river cell takes the concentration of the nearest hand-placed mouth (Hudson, D
   (1013 m³/s) and Delaware (775 m³/s) are 95 % of the discharge. Only 6 mouths exceed 20 m³/s and the others total ~87 m³/s:
   the Connecticut River does not seem to be among the routed rivers in Feb 2019 (not investigated).
 - NO₃ advection bound raised to 60 for this run (river water at 50 would otherwise sit above the limiter's bound).
+- **RC4USCoast** (Gomez et al. 2023, ESSD 15, 2223, doi:10.5194/essd-15-2223-2023; data NOAA NCEI accession 0260455,
+  doi:10.25921/9jfw-ph50, v3.3): monthly series (1950–2022) and monthly climatologies of USGS river chemistry for 140 rivers
+  (52 on the East Coast), netCDF, in the model's units (nutrients, DIC, O₂ in mmol/m³, Alk in meq/m³): alk, dic (calculated
+  from Alk, pH and T; measured `dicm` is sparse), no3, nox, nh4, don, po4, do, doc, sio2, pH, temperature, discharge. Files on
+  triton: `/t0/workdir/enrique/Data/RC4USCoast/` (mclim_19902022_chem.nc, mclim_19902022_disc.nc, series_*.nc,
+  dataset_info.xlsx; 21 MB, fetched from `ncei.noaa.gov/data/oceans/archive/arc0207/0260455/3.3/data/0-data/`).
+  Limits: stations are near river mouths but mostly at the tidal limit (the Delaware is at Trenton, so estuarine processing
+  before the shelf is not included); gaps are not filled, and a month with too few records falls back to the annual mean
+  (the Raritan is constant all year); **no Hudson station**.
+  Feb–Mar means of the 1990–2022 climatology (mmol/m³; Alk meq/m³; Q m³/s, `runs/analysis/rc4_table.jl`):
+
+  | river (mouth) | NO₃ | NH₄ | DON | PO₄ | Alk | DIC | O₂ | Q |
+  |---|---|---|---|---|---|---|---|---|
+  | Delaware (−75.56, 39.47) | 64.4 | 2.2 | 12.1 | 0.58 | 703 | 746 | 433 | 459 |
+  | Connecticut (−72.35, 41.29) | 28.8 | 5.7 | 9.8 | 0.52 | 463 | 511 | 432 | 579 |
+  | Housatonic (−73.11, 41.17) | 35.3 | 2.9 | 12.2 | 0.40 | 1683 | 1736 | 428 | 106 |
+  | Raritan (−74.28, 40.49) | 84.9 | 3.3 | 17.7 | – | 1058 | 1113 | 340 | 33 |
+  | Pawcatuck (−71.85, 41.32) | 26.0 | 2.4 | 15.3 | 0.36 | 186 | 251 | 407 | 26 |
+  | Susquehanna (−76.09, 39.57; Chesapeake, outside the box) | 101.2 | 4.4 | 13.0 | 0.31 | 860 | 905 | 414 | 1682 |
+
+  Against the values used in `bgc_feb19_riv`: the Delaware (50 assumed) is 64; the Connecticut and Housatonic (20 assumed
+  for "other") are 29 and 35; the measured O₂ of the rivers (428–433) is above the 399 of fresh water at 5 °C (about 422 at
+  3 °C). Alk and DIC are 460–1700 and are not loaded at all yet; NH₄ (2–6) and DON (10–18) are small but not zero.
+  Open: the Hudson has no data (50 is the published ">50 µM"; its Alk and DIC need a proxy such as the median of the
+  neighbouring rivers); **the Connecticut (clim. 579 m³/s in Feb–Mar) does not seem to be routed in the model** (the
+  "other" rivers total 87 m³/s on 2019-02-01); the Chesapeake outflow (Susquehanna and Potomac, ~2000 m³/s) is outside the box.
 
 ## Practical notes
 
