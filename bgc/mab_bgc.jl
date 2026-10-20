@@ -992,42 +992,83 @@ end
 river_kw = RIVERS ? (; river_routing = land.river_routing, river_mouth_mixing_depth = RIVER_MIXING_DEPTH) : (;)
 
 # ---------------- BGC: river loads (MAB_RIVER_LOADS, default on with rivers) ----------------
-# The river water carries NO₃ and O₂ (freshwater_tracer_content): the tracer content of a cell is Σᵢ cᵢ Jʷᵢ, the
-# concentration times the volume flux of the river water, so it is rescaled every step by the runoff flux of that day.
-# MAB_RIVER_NO3 gives the NO₃ concentration (mmol/m³) of the Hudson, the Delaware and all other rivers, e.g.
-# "Hudson:50,Delaware:50,other:20": a cell takes the concentration of the nearest of the hand-placed mouths within 100 km
-# of it, "other" elsewhere. O₂ is the saturation of fresh water at MAB_RIVER_O2_TEMPERATURE °C. NH₄, DOM, the particles,
-# DIC and Alk enter with zero concentration, as before (zero Alk and DIC matches the salinity-derived Alk and DIC of the
-# placeholders at S = 0).
+# The river water carries tracers (freshwater_tracer_content). The content of a cell is Σᵢ cᵢ Jʷᵢ, a concentration times the
+# volume flux of the river water, so it is rescaled every step by the runoff flux of the day, with the concentration of the
+# day. A river cell belongs to the class of the nearest hand-placed mouth (Hudson, Delaware) within 100 km, else to "other".
+# MAB_RIVER_CHEMISTRY:
+#   "rc4uscoast" (default): the monthly NO₃, NH₄, DOM (dissolved organic nitrogen), Alk, DIC and O₂ of each class from
+#       RC4USCoast (river_chemistry.jl; files in MAB_RC4_DIR), linear between mid-months;
+#   "assumed": constant NO₃ (MAB_RIVER_NO3, "Hudson:50,Delaware:50,other:20" mmol/m³) and O₂ (fresh-water saturation at
+#       MAB_RIVER_O2_TEMPERATURE °C) only, as in bgc_feb19_riv.
+# P, Z and the particles enter with zero concentration.
 const RIVER_LOADS = RIVERS && get(ENV, "MAB_RIVER_LOADS", "true") == "true"
+const RIVER_CHEMISTRY = get(ENV, "MAB_RIVER_CHEMISTRY", "rc4uscoast")
+RIVER_CHEMISTRY in ("rc4uscoast", "assumed") || error("MAB_RIVER_CHEMISTRY must be rc4uscoast or assumed, got $RIVER_CHEMISTRY")
 const RIVER_NO3 = Dict(Symbol(a) => parse(Float64, b) for (a, b) in
                        split.(filter(!isempty, split(get(ENV, "MAB_RIVER_NO3", "Hudson:50,Delaware:50,other:20"), ",")), ":"))
 const RIVER_O2_TEMPERATURE = parse(Float64, get(ENV, "MAB_RIVER_O2_TEMPERATURE", "5"))
+const RC4_DIR = get(ENV, "MAB_RC4_DIR", joinpath(dirname(DATA_DIR), "RC4USCoast"))
+# (functions and the include are top-level statements of their own: code defined while a block runs is not visible to that block)
+RIVER_LOADS && RIVER_CHEMISTRY == "rc4uscoast" && include(joinpath(@__DIR__, "river_chemistry.jl"))
+river_km(λ₁, φ₁, λ₂, φ₂) = 2 * 6371 * asin(sqrt(sind((φ₂ - φ₁) / 2)^2 + cosd(φ₁) * cosd(φ₂) * sind((λ₂ - λ₁) / 2)^2))
+function river_class(i, j)       # whole-domain cell → the nearest hand-placed mouth within 100 km, or :other
+    best, class = 100.0, :other
+    for m in MAB_EXTRA_MOUTHS
+        d = river_km(river_λ[i], river_φ[j], m.mouth_λ, m.mouth_φ)
+        d < best && ((best, class) = (d, Symbol(m.name)))
+    end
+    return class
+end
+# monthly values, linear between mid-months
+function river_value(values, date)
+    m, ndays = Dates.month(date), Dates.daysinmonth(date)
+    f = (Dates.day(date) - 1 + Dates.hour(date) / 24) / ndays
+    w = f < 0.5 ? 0.5 - f : f - 0.5                   # weight of the neighbouring month
+    return (1 - w) * values[m] + w * values[f < 0.5 ? mod1(m - 1, 12) : mod1(m + 1, 12)]
+end
+function refresh_river_concentration!(date)
+    for t in RIVER_TRACERS, (ti, tj, class) in river_cells
+        interior(river_concentration[t])[ti, tj, 1] = river_value(river_table[t][class], date)
+    end
+end
+# the river loads follow the runoff flux of the land component (kg/m²/s, so volume flux = flux / ρ)
+const last_river_day = Ref(Date(0))
+function update_river_loads!(sim)
+    date = start_date + Millisecond(round(Int, 1000 * sim.model.clock.time))
+    if Date(date) != last_river_day[]
+        refresh_river_concentration!(date); last_river_day[] = Date(date)
+    end
+    for t in RIVER_TRACERS
+        interior(river_content[t]) .= interior(river_concentration[t]) .* interior(runoff_flux) ./ ρ_ocean
+    end
+    return nothing
+end
+
 river_content = (;)
 if RIVER_LOADS
-    haskey(RIVER_NO3, :other) || error("MAB_RIVER_NO3 needs an \"other\" entry")
     river_λ, river_φ = λnodes(ggrid, Center()), φnodes(ggrid, Center())
-    river_km(λ₁, φ₁, λ₂, φ₂) = 2 * 6371 * asin(sqrt(sind((φ₂ - φ₁) / 2)^2 + cosd(φ₁) * cosd(φ₂) * sind((λ₂ - λ₁) / 2)^2))
-    function river_class(i, j)       # whole-domain cell → the nearest hand-placed mouth within 100 km, or :other
-        best, class = 100.0, :other
-        for m in MAB_EXTRA_MOUTHS
-            d = river_km(river_λ[i], river_φ[j], m.mouth_λ, m.mouth_φ)
-            d < best && ((best, class) = (d, Symbol(m.name)))
+    if RIVER_CHEMISTRY == "rc4uscoast"
+        river_table, river_stations = river_chemistry_table(RC4_DIR; box = (λ_bounds..., φ_bounds...))
+        for (class, list) in river_stations
+            say("river chemistry, $class: RC4USCoast rivers $(join(list, ", "))")
         end
-        return class
+    else
+        haskey(RIVER_NO3, :other) || error("MAB_RIVER_NO3 needs an \"other\" entry")
+        river_table = Dict(:NO₃ => Dict(c => fill(get(RIVER_NO3, c, RIVER_NO3[:other]), 12) for c in (:Hudson, :Delaware, :other)),
+                           :O₂  => Dict(c => fill(o2_saturation(RIVER_O2_TEMPERATURE, 0.0), 12) for c in (:Hudson, :Delaware, :other)))
     end
-    river_NO3_concentration = Field{Center, Center, Nothing}(grid)
-    river_O2_concentration  = Field{Center, Center, Nothing}(grid)
-    river_O2 = o2_saturation(RIVER_O2_TEMPERATURE, 0.0)              # µmol/kg ≈ mmol/m³ at 1000 kg/m³
-    for routing in values(land.river_routing), (ti, tj) in zip(Array(routing.target_i), Array(routing.target_j))
-        interior(river_NO3_concentration)[ti, tj, 1] = get(RIVER_NO3, river_class(I_OFF + ti, J_OFF + tj), RIVER_NO3[:other])
-        interior(river_O2_concentration)[ti, tj, 1]  = river_O2
+    const RIVER_TRACERS = Tuple(sort(collect(keys(river_table))))
+    river_cells = [(ti, tj, river_class(I_OFF + ti, J_OFF + tj)) for routing in values(land.river_routing)
+                   for (ti, tj) in zip(Array(routing.target_i), Array(routing.target_j))]
+    river_concentration = NamedTuple(t => Field{Center, Center, Nothing}(grid) for t in RIVER_TRACERS)
+    river_content       = NamedTuple(t => Field{Center, Center, Nothing}(grid) for t in RIVER_TRACERS)
+    refresh_river_concentration!(start_date)
+    say(@sprintf("river loads (%s): %s; this rank's river cells: %s", RIVER_CHEMISTRY, join(RIVER_TRACERS, ", "),
+                 join(["$(count(c -> c[3] == class, river_cells)) $class" for class in unique(c[3] for c in river_cells)], ", ")))
+    for class in (:Hudson, :Delaware, :other)
+        say("  $class on $(Dates.format(start_date, "yyyy-mm-dd")): " *
+            join([@sprintf("%s %.1f", t, river_value(river_table[t][class], start_date)) for t in RIVER_TRACERS], ", "))
     end
-    river_content = (; NO₃ = Field{Center, Center, Nothing}(grid), O₂ = Field{Center, Center, Nothing}(grid))
-    classes = [river_class(I_OFF + ti, J_OFF + tj) for routing in values(land.river_routing) for (ti, tj) in zip(Array(routing.target_i), Array(routing.target_j))]
-    say(@sprintf("river loads: NO₃ %s mmol/m³, O₂ %.0f mmol/m³ (fresh water at %.0f °C); this rank's river cells: %s",
-                 join(["$k $v" for (k, v) in RIVER_NO3], ", "), river_O2, RIVER_O2_TEMPERATURE,
-                 join(["$(count(==(c), classes)) $c" for c in unique(classes)], ", ")))
 end
 
 ocean = ocean_simulation(grid; free_surface, boundary_conditions, forcing, additional_surface_fluxes, closure_kw..., advection_kw...,
@@ -1133,16 +1174,11 @@ catch e
 end
 simulation = Simulation(model; Δt = Δt_baroclinic, stop_time = sim_days * days, stop_iteration = STOP_ITERATION)
 
-# BGC: the river loads follow the runoff flux of the land component (kg/m²/s, so volume flux = flux / ρ)
+# BGC: the river loads follow the runoff flux of the land component (update_river_loads! is defined above)
 if RIVER_LOADS
     runoff_flux = model.interfaces.exchanger.land.state.runoff_freshwater_flux
     ρ_ocean = model.interfaces.ocean_properties.reference_density
     river_area = [Oceananigans.Operators.Azᶜᶜᶜ(i, j, 1, grid) for i in 1:size(grid, 1), j in 1:size(grid, 2)]
-    function update_river_loads!(sim)
-        interior(river_content.NO₃) .= interior(river_NO3_concentration) .* interior(runoff_flux) ./ ρ_ocean
-        interior(river_content.O₂)  .= interior(river_O2_concentration)  .* interior(runoff_flux) ./ ρ_ocean
-        return nothing
-    end
     add_callback!(simulation, update_river_loads!, IterationInterval(1))
     update_river_loads!(simulation)
 end
@@ -1276,8 +1312,9 @@ function progress(sim)
     say("                  " * join([@sprintf("%s∈[%.3g,%.4g]", name, range_of(tr[name])...) for name in (:NO₃, :P, :Z, :O₂, :DIC, :Alk)], "  "))
     if RIVER_LOADS
         Q = allsum(sum(interior(runoff_flux)[:, :, 1] .* river_area)) / ρ_ocean                  # m³/s
-        L = allsum(sum(interior(river_content.NO₃)[:, :, 1] .* river_area)) / 1000                # mol/s
-        say(@sprintf("                  rivers: Q = %.0f m³/s, NO₃ load = %.1f mol/s (mean %.1f mmol/m³)", Q, L, Q > 0 ? 1000L / Q : 0.0))
+        loads = [allsum(sum(interior(river_content[t])[:, :, 1] .* river_area)) for t in RIVER_TRACERS]   # mmol/s
+        say(@sprintf("                  rivers: Q = %.0f m³/s, mean concentration %s", Q,
+                     join([@sprintf("%s %.1f", t, Q > 0 ? l / Q : 0.0) for (t, l) in zip(RIVER_TRACERS, loads)], ", ")))
     end
     wall[] = time()
     return nothing
