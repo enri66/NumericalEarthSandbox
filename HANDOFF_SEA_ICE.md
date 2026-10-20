@@ -427,3 +427,23 @@ Early December 2013 (question from the 10-day test, 10³ km²; CIS on the chart 
   thicknesses). CS2SMOS volume is lower than GLORYS mid-winter on its cells (Gulf Feb 24: 64 vs 83 km³).
 - The model columns cover the run so far (ice12_winter had reached ~Dec 13 at the time); rerun the sbatch when job
   11793 finishes.
+
+## NumericalEarth fixes for GLORYS ice and the out-of-bounds read (2026-10-16, fork branches, no PRs yet)
+
+Both on enri66/NumericalEarth.jl, branched from upstream `main` (526d401c), each with a test that fails on `main`.
+- `glorys-sea-ice-open-water` (7870435d): GLORYS `retrieve_data` reads missing `siconc`/`sithick` as 0 (ice-free ocean
+  and land). On `main`, 2013-12-01 GSL box onto a 100×50 grid: plain `Field`/`FieldTimeSeries` NaN in 4674 of 5000 cells,
+  with `NearestNeighborInpainting(Inf)` (DatasetRestoring's default) ice in 4996 cells; with the fix no NaN and 346 iced
+  cells both ways. Test in `test/test_glorys_surface_variables.jl` (synthetic file, offline). Old `siconc_*_inpainted.jld2`
+  / `sithick_*_inpainted.jld2` caches hold the spread ice: delete them. ECCO: Field/FTS are fine (no inpainting for sea
+  ice, zeros kept), but ECCO4Monthly's `default_mask_value` is 0, so DatasetRestoring of SIarea/SIheff (inpainting
+  Inf) would mask all ice-free cells and spread ice the same way (from the code; no ECCO ice files at hand to run).
+- `cyclic-fts-boundary-window` (4482e8f5): an `Interpolated` FTS source filled without a clock is read at the first
+  snapshot in memory instead of at t = 0. Cause of the GSL crash (job 11791 log): the consistency loop leaves u's window
+  at (10, 11), `fts_u[1]` moves it to (1, 2), and the clockless fill in `set_from_frame!` at t = 0 needs (11, 1). Test in
+  `test/test_nested_simulation.jl`: BoundsError with `--check-bounds=yes` on `main`, wrong halo value without.
+- Not fixed (Oceananigans, follow-up): a *clocked* halo fill also reads outside the window when host reads (`fts[n]`)
+  moved it after the last `update_state!` — plain Oceananigans reproduces it (`ValueBoundaryCondition(fts)`, `fts[2]`,
+  `set!(model, T = 0)` → BoundsError). `prepare_halo_fill!` cannot fix it: on Oceananigans `main` the Field halo fill
+  adapts the boundary conditions (`convert_to_device`) before the hook runs, so the window must be updated on the host
+  series in `fill_halo_regions!(::Field, clock, …)` before that conversion. Script 05 is safe with Clamp as it is.
