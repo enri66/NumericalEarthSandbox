@@ -161,6 +161,37 @@ simulation, with realistic initial, boundary and river inputs, and validate it a
   `mpi05_bgc` is updated to it (old manifest kept as `Manifest.toml.bak-2026-10-15`), so MAB_BGC_DATA=copernicus
   runs with the default environment. Not proposed upstream.
 
+## Validation of `bgc_feb19_cmb` (2019-02-04 → 03-29 daily frames, 2026-10-20)
+
+`bgc/validate_bgc.jl` (run on triton with the `mpi05_bgc` environment; data from `bgc/download_validation_data.sh`):
+satellite chlorophyll (Copernicus L3 multi-sensor, 4 km, only where the satellite saw the surface; 32 % of pixels) and
+the OOI Pioneer sensors at CNSM and ISSM (7 m near-surface frame, seafloor node), with the model's chlorophyll taken as
+1.31 mg Chl/mmol N × P. Figures and `summary.txt` in `runs/analysis/bgc_bgc_feb19_cmb/`.
+
+- **Surface chlorophyll (maps, matched cell-days).** Whole-domain log10 correlation 0.64, but the shelf-to-ocean contrast is
+  too weak. Satellite / model means (mg/m³): shelf (< 100 m) 2.4 / 1.0, upper slope 0.70 / 1.0, deep (> 1000 m) 0.31 / 0.57.
+  Region-mean time series: r = 0.05 (shelf), 0.52 (slope), 0.78 (deep; mostly the shared late-winter rise).
+  The offshore excess is there on the first day (about 2×), so it comes from the initial and boundary data (PISCES
+  phytoplankton carbon × 16/106 × 1.31), not from the model's own dynamics. Near the coast the satellite may itself be too high (or the
+  fluorometer too low): at ISSM the satellite is 1.8× the in-situ fluorometer over 28 matched days, at CNSM they agree
+  (0.82 vs 0.88), so the shelf bias of the model is somewhere between 1.3× and 2.4× too low.
+- **Chlorophyll at the moorings.** CNSM / ISSM mean fluorometer 0.96 / 0.62 against model 1.12 / 0.95; the daily series are
+  anticorrelated (r = −0.60, −0.17): the model bloom comes late and large at CNSM (2.3 mg/m³ at days 37–42, the fluorometer
+  peaks at 1.5 on day 18), and rises at ISSM where the fluorometer falls.
+- **Nitrate (SUNA).** Far too low and lost too early. CNSM: sensor 4.5–8, model 1.8 on day 3 (data too low from the start)
+  falling to 0 after day 40; ISSM: sensor 0.3–2.6, model 1.4 falling to 0 by day 38. The model's nitrate runs out as its
+  bloom starts, while the sensors still read nitrate. River water carries NO₃ = 0 (the default `freshwater_tracer_content`),
+  so it can only dilute the shelf nitrate; river loads are still to be added.
+- **Oxygen.** The model starts 83–87 % saturated at 7 m (its initial PISCES O₂) and air-sea exchange takes about 35 days to bring it to ~100 %, so the first
+  month of O₂ is a spin-up (not tested why it is so slow: mixed-layer depth and the gas transfer velocity are the
+  candidates). The Pioneer
+  near-surface optodes read 123–131 % saturation in Feb–Mar with QC flag 1, which is not physical, so they cannot check the
+  absolute value (mean offset −92/−104 mmol/m³); their variability is small. The seafloor optode at ISSM (11 days)
+  reads 270 against the model's 230 mmol/m³.
+- **Not done:** vertical sections (the wire-following profilers have fluorometers), discrete samples or WOA for an independent
+  oxygen and nutrient reference, the Copernicus hindcast's own chlorophyll and nitrate against the same observations (to
+  separate its bias from the model's), pCO₂.
+
 ## Practical notes
 
 - Sandbox: `~/Dropbox/Models/NumericalEarthSandbox` (Mac) and `/t0/workdir/enrique/Models/NumericalEarthSandbox`
