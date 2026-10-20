@@ -3,38 +3,14 @@
 # For each column: model and GLORYS MLD (as in transects_vs_glorys.jl), the model's horizontal buoyancy gradient
 # averaged over its own mixed layer |∇b|, and the Fox-Kemper restratifying buoyancy flux scale H²|∇b|²/|f|.
 #   MAB_TAG=/abs/path/prefix MAB_DAYS=20,30 julia --project=<run env> scripts/mld_bias_vs_fronts.jl
-using Oceananigans, NumericalEarth, Printf, Statistics, Dates, CairoMakie
-using Oceananigans.Grids: znodes, λnodes, φnodes
-const NCD = Base.loaded_modules[only(id for id in keys(Base.loaded_modules) if id.name == "NCDatasets")]
-const SWP = Base.loaded_modules[only(id for id in keys(Base.loaded_modules) if id.name == "SeawaterPolynomials")]
+using CairoMakie
+include(joinpath(@__DIR__, "mab_analysis_common.jl"))
 
-const GDIR = get(ENV, "MAB_DATA_DIR", joinpath(homedir(), "Data", "NumericalEarth"))
 const PREFIX = ENV["MAB_TAG"]
-const start_date = DateTime(get(ENV, "MAB_START_DATE", "2019-04-01"))   # the run's start (its clock's zero)
-const eos = SWP.TEOS10.TEOS10EquationOfState()
-σ₀(T, S) = SWP.ρ(T, S, 0, eos) - 1000
 const g, ρ₀, Ω, Rₑ = 9.81, 1026.0, 7.292e-5, 6.371e6
 
-# ---- model output, combining per-rank files (see transects_vs_glorys.jl) ----
-function global_grid(vol)
-    JLD2 = Base.loaded_modules[only(id for id in keys(Base.loaded_modules) if id.name == "JLD2")]
-    stem = basename(splitext(vol)[1])
-    paths = filter(f -> occursin(Regex("^" * stem * "_rank\\d+\\.jld2\$"), basename(f)), readdir(dirname(vol); join = true))
-    grids = [JLD2.jldopen(f -> f["serialized/grid"], p) for p in paths]
-    ugs = [gr.underlying_grid for gr in grids]
-    order = sortperm([ug.λᶠᵃᵃ[1] for ug in ugs])
-    bottom(r) = (b = grids[r].immersed_boundary.bottom_height; n = ugs[r].Nx; m = ugs[r].Ny;
-                 ndims(b) == 2 ? collect(b[1:n, 1:m]) : collect(b[1:n, 1:m, 1]))
-    bh = cat([bottom(r) for r in order]...; dims = 1)
-    u1, u2 = ugs[order[1]], ugs[order[end]]
-    gr = LatitudeLongitudeGrid(CPU(); size = (size(bh, 1), u1.Ny, u1.Nz), longitude = (u1.λᶠᵃᵃ[1], u2.λᶠᵃᵃ[u2.Nx + 1]),
-                               latitude = (u1.φᵃᶠᵃ[1], u1.φᵃᶠᵃ[u1.Ny + 1]), z = collect(znodes(u1, Face())),
-                               halo = Oceananigans.Grids.halo_size(u1))
-    return ImmersedBoundaryGrid(gr, GridFittedBottom(bh))
-end
 vol = PREFIX * "_volume_daily.jld2"
-grid_kw = isfile(vol) ? (;) : (; grid = global_grid(vol))
-TV = FieldTimeSeries(vol, "T"; backend = OnDisk(), grid_kw...); SV = FieldTimeSeries(vol, "S"; backend = OnDisk(), grid_kw...)
+TV = open_series(vol, "T"; backend = OnDisk()); SV = open_series(vol, "S"; backend = OnDisk())
 grid = TV.grid; ug = grid.underlying_grid
 Nx, Ny, Nz = size(ug)
 λ = collect(λnodes(ug, Center())); φ = collect(φnodes(ug, Center())); zc = collect(znodes(ug, Center()))
@@ -45,30 +21,7 @@ wet3 = [zc[k] > bh[i, j] for i in 1:Nx, j in 1:Ny, k in 1:Nz]
 tdays = TV.times ./ 86400
 days = parse.(Float64, split(get(ENV, "MAB_DAYS", string(round(Int, tdays[end]))), ","))
 
-# ---- GLORYS (as in transects_vs_glorys.jl) ----
-gfile(var, date) = first(filter(x -> occursin("$(var)_GLORYSDaily_$(Dates.format(date, "yyyy-mm-dd"))T", x) &&
-                                     endswith(x, "-76.0_-64.0_34.0_42.0.nc"), readdir(GDIR; join = true)))
-function read_glorys(var, date)
-    ds = NCD.Dataset(gfile(var, date))
-    lon = Float64.(ds["longitude"][:]); lat = Float64.(ds["latitude"][:]); dep = Float64.(ds["depth"][:])
-    A = [ismissing(x) ? NaN : Float64(x) for x in ds[var][:, :, :, 1]]
-    close(ds)
-    return lon, lat, dep, A
-end
-function glorys_at(var, d)
-    day0 = start_date + Day(floor(Int, d)) - Day(1)
-    lon, lat, dep, A = read_glorys(var, day0)
-    _, _, _, A1 = read_glorys(var, day0 + Day(1))
-    return lon, lat, dep, (A .+ A1) ./ 2
-end
-function bilinear(A, lon, lat, x, y)
-    i = clamp(searchsortedlast(lon, x), 1, length(lon) - 1); j = clamp(searchsortedlast(lat, y), 1, length(lat) - 1)
-    a = (x - lon[i]) / (lon[i+1] - lon[i]); b = (y - lat[j]) / (lat[j+1] - lat[j])
-    w = ((1 - a) * (1 - b), a * (1 - b), (1 - a) * b, a * b); v = (A[i, j], A[i+1, j], A[i, j+1], A[i+1, j+1])
-    num = sum(w[n] * v[n] for n in 1:4 if isfinite(v[n]); init = 0.0)
-    den = sum(w[n] for n in 1:4 if isfinite(v[n]); init = 0.0)
-    return den > 0 ? num / den : NaN
-end
+# ---- GLORYS (read_glorys, glorys_at and bilinear are in mab_analysis_common.jl) ----
 glorys_profile(A, lon, lat, dep, i, j) =
     [dep[k] < -bh[i, j] ? bilinear(view(A, :, :, k), lon, lat, λ[i], φ[j]) : NaN for k in eachindex(dep)]
 
