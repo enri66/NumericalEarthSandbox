@@ -230,7 +230,16 @@ A river cell takes the concentration of the nearest hand-placed mouth (Hudson, D
   Against the values used in `bgc_feb19_riv`: the Delaware (50 assumed) is 64; the Connecticut and Housatonic (20 assumed
   for "other") are 29 and 35; the measured O₂ of the rivers (428–433) is above the 399 of fresh water at 5 °C (about 422 at
   3 °C). Alk and DIC are 460–1700 and are not loaded at all yet; NH₄ (2–6) and DON (10–18) are small but not zero.
-  Open: the Hudson has no data (50 is the published ">50 µM"; its Alk and DIC need a proxy such as the median of the
+  **Implemented (2026-10-20, `bgc/river_chemistry.jl`, `MAB_RIVER_CHEMISTRY=rc4uscoast`, the default):** the river cells
+  of each class take the discharge-weighted monthly climatology (1990-2022) of NO₃, NH₄, DOM (= don), Alk, DIC and O₂ of the
+  RC4USCoast rivers they stand for, linear between mid-months and multiplied by the runoff flux every step:
+  Delaware = Delaware + Schuylkill (the GloFAS cell lies below their confluence), Hudson = PROXY (Connecticut, Housatonic,
+  Delaware, Schuylkill: the dataset has no Hudson station), other = the other rivers with a mouth in the box. February
+  values (NO₃ / NH₄ / DOM / Alk / DIC / O₂): Delaware 102 / 6.2 / 14.6 / 852 / 899 / 448, Hudson proxy 66 / 6.2 / 12 / 764 /
+  810 / 442, other 38 / 6.0 / 11 / 680 / 729 / 425. `MAB_RIVER_CHEMISTRY=assumed` keeps the constant NO₃ and O₂ of
+  `bgc_feb19_riv`. The run `bgc_feb19_rc4` (job 11946) replaced `bgc_feb19_riv` (11941, cancelled after 52 min) with
+  BGC_BOUNDS="NO₃:0:150,O₂:50:500,DIC:0:2300" (the river values would sit above the old limits).
+  Still open: the Hudson has no data (50 is the published ">50 µM"; its Alk and DIC need a proxy such as the median of the
   neighbouring rivers); **the Connecticut (clim. 579 m³/s in Feb–Mar) does not seem to be routed in the model** (the
   "other" rivers total 87 m³/s on 2019-02-01); the Chesapeake outflow (Susquehanna and Potomac, ~2000 m³/s) is outside the box.
 
