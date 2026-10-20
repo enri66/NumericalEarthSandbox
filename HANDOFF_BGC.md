@@ -112,6 +112,12 @@ simulation, with realistic initial, boundary and river inputs, and validate it a
     ≤ 24 (37 unbounded) and the O₂ minimum ≥ 84 (59), with domain totals within 4e-5 of the unbounded run. But the hot
     cells remain (39 vs 43 on day 47) and the worst bottom cell still drifts (NO₃ 5 → 23, O₂ 247 → 84): the bounds keep
     the values possible, they do not stop the bottom cell from decoupling from the water above.
+  - Full Copernicus runs (59 days from 2019-02-01, 4 ranks, ~15 h each; `bgc_feb19_cm` unbounded, job 11842, and
+    `bgc_feb19_cmb`, job 11917, with MAB_BGC_BOUNDS="NO₃:0:30,O₂:50:450,DIC:0:2300"; `runs/bgc/compare_runs.jl`): the
+    unbounded run reaches NO₃ 47, O₂ 36 and DIC 2413 in bottom cells; the bounded one stays within NO₃ ≤ 24.3,
+    O₂ ≥ 82, DIC ≤ 2162, and its domain sums of NO₃, O₂ and DIC differ by at most 1.3e-4. The number of hot bottom cells
+    (13–35 over days 8–53) is almost the same in both (bounded: 2–4 fewer). So the bounds are a safeguard; the cause
+    in the bottom-cell advection next to the immersed slope remains open.
 - NumericalEarth fix: the OceanBioME extension's gas exchange read `sea_ice.model.ice_concentration`, which fails with
   `OceanOnlyModel` (the sea ice is `FreezingLimitedOceanTemperature`); it now calls `sea_ice_concentration`. On the
   fork's `everything` branch as d9dfcbf6; not proposed upstream yet.
