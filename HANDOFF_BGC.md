@@ -243,6 +243,31 @@ A river cell takes the concentration of the nearest hand-placed mouth (Hudson, D
   neighbouring rivers); **the Connecticut (clim. 579 m³/s in Feb–Mar) does not seem to be routed in the model** (the
   "other" rivers total 87 m³/s on 2019-02-01); the Chesapeake outflow (Susquehanna and Potomac, ~2000 m³/s) is outside the box.
 
+## Analysis of `bgc_feb19_rc4` (RC4USCoast river loads; 59 days, finished cleanly; 2026-10-21)
+
+Compared with `bgc_feb19_cmb` (same setup, no river loads, NO₃ bound 30): `bgc/compare_rivers.jl` (figures and summary in
+`runs/analysis/rivers_bgc_feb19_rc4_vs_bgc_feb19_cmb/`), `bgc/validate_bgc.jl` for the observations, `runs/analysis/negatives.jl`.
+- **The Pioneer sensors cannot test the loads.** Every CNSM/ISSM statistic of the rc4 run equals the cmb run's to the digit:
+  the moorings are 200–270 km east of the Hudson and Delaware mouths, upstream of the southwestward shelf flow. (The
+  satellite shelf statistics do change slightly: bias −0.25 → −0.24, r +0.20 → +0.25.)
+- **The loads act in the near field only.** Surface NO₃ rises by more than 1 mmol/m³ in 52 cells of the mean map (19 above 5,
+  none above 20), at most 23 km from the Hudson mouth and 45 km from the Delaware (median depth 10 m). Mean over the
+  100-km regions (days ≥ 8, without / with loads): Hudson NO₃ 0.04 / 0.22, chl 1.00 / 1.09; Delaware NO₃ 0.70 / 2.23, chl 1.24 / 1.39 mg/m³.
+  Without loads the plume regions' surface NO₃ is gone by day 20–35; with loads it lasts 2–4 weeks longer (Delaware still
+  0.6 on day 56), and chlorophyll is higher by 0.1–0.4 mg/m³ from about day 30.
+- **Satellite chlorophyll in the plume regions** (satellite 4.4–4.6 mg/m³, model 0.9–1.3; log10 bias / r without → with loads):
+  Hudson −0.58 / 0.31 → −0.56 / 0.43; Delaware −0.51 / 0.43 → −0.47 / 0.62. The pattern improves, the model is still 3–4× too low.
+  Salinity in the plumes is identical in both runs (same physics).
+- **Ammonium goes negative in both runs (not caused by the loads).** On day 56, 21.9 % of all wet cells have NH₄ < 0
+  (50 000 cells < −0.1, 14 000 < −0.5, minimum −2.44 mmol/m³), and 4 915 of 11 951 surface columns are below −0.1 (day 20:
+  3.3 % of cells, 1 464 surface columns). P, Z, DOM, the particles and O₂ stay non-negative (bounded WENO); NO₃ dips to −0.1.
+  LOBSTER's NH₄ uptake and nitrification act as sources and sinks, which the advection bounds cannot constrain, and
+  OceanBioME's `scale_negatives` (conserving the nitrogen and carbon of each cell) is off by default and was not used.
+  The chlorophyll and nutrient results of all prototype runs are affected until this is fixed.
+- **The wide NO₃ bound brought the bottom-cell overshoot back**: maximum NO₃ 38 on day 56 against 23.9 with the bound at 30.
+  The river values (NO₃ up to 103) need a bound above 30 in the mouth cells only.
+- Still open: the Connecticut River is not routed; Hudson chemistry is a proxy.
+
 ## Practical notes
 
 - Sandbox: `~/Dropbox/Models/NumericalEarthSandbox` (Mac) and `/t0/workdir/enrique/Models/NumericalEarthSandbox`
