@@ -1,4 +1,4 @@
-# Comment draft for CliMA/Oceananigans.jl#6296 (2026-10-21). NOT POSTED. For Enri to read first.
+# Comment on CliMA/Oceananigans.jl#6296 (2026-10-21). POSTED with Enri's OK: https://github.com/CliMA/Oceananigans.jl/issues/6296#issuecomment-6327377416
 
 Two follow-ups after trying `fma` in the fork.
 
