@@ -1,6 +1,6 @@
 # Issue draft (2026-10-21), for Enri to read before anything is posted
 
-Repo: CliMA/Oceananigans.jl. Type: issue, not a PR. Nothing here has been posted.
+Repo: CliMA/Oceananigans.jl. Type: issue, not a PR. POSTED 2026-10-21 as CliMA/Oceananigans.jl#6296 (Enri's OK).
 
 ## Title
 
