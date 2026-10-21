@@ -267,6 +267,20 @@ Compared with `bgc_feb19_cmb` (same setup, no river loads, NO₃ bound 30): `bgc
 - **The wide NO₃ bound brought the bottom-cell overshoot back**: maximum NO₃ 38 on day 56 against 23.9 with the bound at 30.
   The river values (NO₃ up to 103) need a bound above 30 in the mouth cells only.
 - Still open: the Connecticut River is not routed; Hudson chemistry is a proxy.
+- **Scaling negative tracers (2026-10-21; `MAB_BGC_SCALE_NEGATIVES`, `bgc_feb19_rc4sn` = restart of `bgc_feb19_rc4` from its day-35
+  checkpoint to day 50 with ScaleNegativeTracers, invalid cells set to zero; `bgc/compare_scaling.jl`, 9 shared frames, days 39–47):**
+  - NH₄ < 0 in 0.0 % of the wet cells and 0 % of the surface columns (unscaled: 6.9 % rising to 15.4 % of the wet cells and
+    20 % to 34 % of the surface columns; minimum NH₄ −1.9 → −2.3); NO₃ has no negatives either (minimum 5e-4 on day 48).
+  - Nitrogen is conserved: the total of NO₃+NH₄+P+Z+DOM+sPOM+bPOM differs from the unscaled run by +6e-6 to +2e-5 (relative).
+  - The bottom-cell overshoot is untouched: maximum NO₃ 42.2 and minimum O₂ 78.6 on the last shared day, in both runs.
+  - Surface chlorophyll is lower with scaling (shelf 1.07 → 0.77, slope 1.26 → 0.88, deep 0.63 → 0.58 mg/m³): the negative NH₄
+    had left more nitrogen in the positive pools (the total, negatives included, is conserved). Against the satellite (log10
+    bias / r, unscaled → scaled): shelf −0.20 / +0.03 → −0.35 / −0.11, slope +0.24 / +0.35 → +0.11 / +0.22, deep +0.30 / +0.45 → +0.28 / +0.39.
+    The gap is already there at the first shared frame (the restart removed the accumulated negatives at once), so the
+    size of the steady effect needs a scaled run from day 0.
+  - Cost: about 2× per step (460–550 s per 6 model hours against 207–215 s), so a 59-day run takes about 30 h instead of 15.
+  - The earlier chlorophyll conclusions (shelf 1.3–2.4× too low) were flattered by the negative NH₄: with scaling the shelf is
+    up to 3× too low, which points again at the shelf nitrogen supply.
 
 ## Practical notes
 
