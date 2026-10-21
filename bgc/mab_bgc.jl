@@ -927,8 +927,13 @@ end
 const BGC_SEDIMENT = get(ENV, "MAB_BGC_SEDIMENT", "true") == "true"
 sediment_kw = BGC_SEDIMENT ? (; sediment = InstantRemineralisationSediment(grid; sinking_tracers = (:sPOM, :bPOM),
                                                                              remineralisation_reciever = :NH₄)) : (;)
+# MAB_BGC_SCALE_NEGATIVES (default false): OceanBioME's ScaleNegativeTracers, which in every cell sets the negative tracers
+# of a conserved group (nitrogen; carbon with DIC) to zero and scales the positive ones to keep the group's total, and
+# sets the cell to zero where the total itself is negative (invalid_fill_value = 0, which does not conserve there).
+const BGC_SCALE_NEGATIVES = get(ENV, "MAB_BGC_SCALE_NEGATIVES", "false") == "true"
 biogeochemistry = LOBSTER(grid; surface_PAR = PARFromShortwave(grid), oxygen = Oxygen(), inorganic_carbon = CarbonateSystem(),
-                          sediment_kw...)
+                          scale_negatives = BGC_SCALE_NEGATIVES, invalid_fill_value = 0.0, sediment_kw...)
+BGC_SCALE_NEGATIVES && say("negative BGC tracers scaled (ScaleNegativeTracers, conserved groups, invalid cells set to zero)")
 const BGC_TRACERS = required_biogeochemical_tracers(biogeochemistry)
 say("biogeochemistry: LOBSTER + O₂ + carbonate system, tracers $(join(BGC_TRACERS, ", ")), seafloor remineralisation $(BGC_SEDIMENT ? "on" : "off")")
 
