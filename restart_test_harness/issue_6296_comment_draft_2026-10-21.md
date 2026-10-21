@@ -27,9 +27,6 @@ configuration on one rank (Xeon Gold 6248R, 24 threads, Float64), two runs each:
 | `fma` | 3.23, 3.44 |
 
 That is about 4% slower on average, but the spread between the two runs of the same code is about as large (0.05-0.2 s),
-so I would not read more into it than "no large slowdown here". I did not measure on a GPU, and on CPUs without hardware
-FMA (I have Sandy Bridge nodes) `fma` is a slow software routine, so this would not suit those.
-
-Happy to open a PR with the macro if that is the direction you want, or to run anything on this setup that would help.
+so I would not read more into it than "no large slowdown here". I did not measure on a GPU.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
