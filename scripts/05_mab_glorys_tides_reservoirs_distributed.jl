@@ -715,7 +715,11 @@ using Oceananigans.Grids: inactive_cell
 @inline wet_node(i, j, k, grid, ::Center, ::Face) = !inactive_cell(i, j, k, grid) & !inactive_cell(i, j - 1, k, grid)
 
 function sponge_parameters(fts, μ, LX, LY; baroclinic)
-    columns = [(i, j) for j in axes(μ, 2), i in axes(μ, 1) if μ[i, j] > 0]
+    # Only this rank's sponge columns, with a margin of a few cells for the lookups from halo cells: the targets are
+    # (columns × levels × GLORYS frames), which for the whole domain is 26 GB per variable for a year at 1/60 degree.
+    local_i = (I_OFF - 3):(I_OFF + Nλ ÷ PARTITION_X + 4)
+    local_j = (J_OFF - 3):(J_OFF + Nφ ÷ PARTITION_Y + 4)
+    columns = [(i, j) for j in axes(μ, 2), i in axes(μ, 1) if μ[i, j] > 0 && i in local_i && j in local_j]
     column_index = zeros(Int, size(μ))
     weights = zeros(length(columns), Nz)
     for (c, (i, j)) in enumerate(columns)
