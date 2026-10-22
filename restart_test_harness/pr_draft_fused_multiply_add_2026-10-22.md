@@ -1,4 +1,4 @@
-# PR draft (2026-10-22), NOT SUBMITTED. Submit only if the Oceananigans developers agree on CliMA/Oceananigans.jl#6296.
+# PR draft (2026-10-22). SUBMITTED 2026-10-22 as CliMA/Oceananigans.jl#6313 (Enri's OK), before the maintainers had replied on #6296.
 
 Repo / base: CliMA/Oceananigans.jl `main` (77f96ece9 when prepared)
 Head: enri66/Oceananigans.jl `fused-multiply-add-option` (ad3f135b2, rebased on main 77f96ece9; local worktree ~/dev/Oceananigans-pr-fma)
