@@ -267,6 +267,30 @@ Compared with `bgc_feb19_cmb` (same setup, no river loads, NO₃ bound 30): `bgc
 - **The wide NO₃ bound brought the bottom-cell overshoot back**: maximum NO₃ 38 on day 56 against 23.9 with the bound at 30.
   The river values (NO₃ up to 103) need a bound above 30 in the mouth cells only.
 - Still open: the Connecticut River is not routed; Hudson chemistry is a proxy.
+
+## `bgc_feb19_sc`: RC4USCoast rivers + scaled negative tracers, 59 days from 2019-02-01 (finished 2026-10-23; 2026-10-23)
+
+Run with BGC_BOUNDS="NO₃:0:150,O₂:50:500,DIC:0:2300", Copernicus data, `MAB_BGC_SCALE_NEGATIVES=true`; 4 triton24 nodes, ~33 h (460–550 s
+per 6 model hours). Analyses: `bgc/validate_bgc.jl`, `bgc/compare_scaling.jl` (RUN_A=rc4, RUN_B=sc), `bgc/chl_comparison.jl`
+(figures and animation of three runs; copies in `analysis_bgc_feb19/`, not committed: PNGs and a 4 MB mp4).
+- **Negative ammonium is gone**: 0.0 % of the wet cells and surface columns on every day (the unscaled run goes from 0.2 % of
+  the wet cells on day 3 to 21.9 % on day 56, and from 0.9 % to 41 % of the surface columns); minimum NH₄ ≈ 0.
+  Nitrogen total differs from the unscaled run by +4e-7 (day 3) growing to +2.6e-4 (day 56).
+- The bottom-cell overshoot is still there (maximum NO₃ 38.0 → 40.1, minimum O₂ 88.6 → 86.5 on day 56).
+- **Chlorophyll against the satellite** (matched cell-days, log10 bias / rms / r; model → satellite mean in mg/m³), no loads /
+  rivers / rivers + scaling: shelf −0.25 / 0.42 / 0.20, −0.24 / 0.41 / 0.25, −0.31 / 0.45 / 0.30 (model 1.0, 1.0, 0.86 vs 2.39);
+  slope +0.14 / 0.29 / 0.30, +0.14 / 0.29 / 0.30, +0.07 / 0.23 / 0.21 (1.0, 1.0, 0.80 vs 0.70); deep +0.32 / 0.40 / 0.48 (twice),
+  +0.31 / 0.39 / 0.45 (0.57, 0.57, 0.53 vs 0.30). Region means fall by 15 % (shelf), 17 % (slope), 5 % (deep) with
+  scaling over the whole period (the restart test had said 28 %, 30 %, 8 %: part of it was the one-time removal of the accumulated negatives).
+  The offshore excess and the weak shelf-to-ocean contrast remain (inherited from the PISCES phytoplankton carbon).
+- **Pioneer sites** (CNSM / ISSM, unscaled → scaled): chlorophyll mean 1.12 → 0.91 / 0.95 → 0.81 (fluorometer 0.96 / 0.62), rms 0.58 → 0.30
+  / 0.41 → 0.27, r −0.60 → −0.23 / −0.17 → −0.15; the late bloom spike (2.3 mg/m³ at CNSM on days 37–42) is gone but the model is
+  too flat (std model/obs 0.29 / 0.35). Nitrate at 7 m: 1.36 → 1.96 / 0.54 → 0.73 (SUNA 6.5 / 1.5); the unscaled run is driven to zero after
+  day 40, the scaled one keeps 1.5–4.7 at CNSM. O₂ unchanged (model 96–98 % saturated, sensors 125–131 %).
+- Still open: shelf nitrogen supply (nitrate 3× too low at CNSM), Hudson chemistry is a proxy, the Connecticut River is not routed,
+  the offshore chlorophyll excess, the bottom-cell overshoot, the first-month oxygen spin-up.
+- The forks' `everything` moved to Oceananigans 0.114 on 2026-10-21; `mpi05_bgc` still has the earlier manifest (these runs used it).
+
 - **Scaling negative tracers (2026-10-21; `MAB_BGC_SCALE_NEGATIVES`, `bgc_feb19_rc4sn` = restart of `bgc_feb19_rc4` from its day-35
   checkpoint to day 50 with ScaleNegativeTracers, invalid cells set to zero; `bgc/compare_scaling.jl`, 9 shared frames, days 39–47):**
   - NH₄ < 0 in 0.0 % of the wet cells and 0 % of the surface columns (unscaled: 6.9 % rising to 15.4 % of the wet cells and
