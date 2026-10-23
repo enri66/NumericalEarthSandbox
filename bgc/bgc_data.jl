@@ -10,6 +10,7 @@
 #   MAB_BGC_DATA=copernicus
 #     NO₃, O₂   Copernicus Marine global BGC hindcast (GLOBAL_MULTIYEAR_BGC_001_029, PISCES, 1/4°, NumericalEarth's
 #               CopernicusBGCMonthly): the monthly mean of each month placed at mid-month, as the WOA months are
+#               (MAB_BGC_NO3_SOURCE=woa takes the NO₃ of this case from WOA, as above)
 #     P         the same product's phytoplankton carbon (phyc, mmol C/m³) times the Redfield N:C 16/106
 #               (LOBSTER's P is mmol N/m³)
 #     Alk, DIC  the hindcast has no carbonate system (in v202406 dissic and talk are only in the analysis-forecast
@@ -36,6 +37,11 @@ const μmol_per_kg_to_mmol_per_m³ = 1.025   # WOA reports µmol/kg; ρ = 1025 k
 
 const BGC_DATA = get(ENV, "MAB_BGC_DATA", "woa")
 BGC_DATA in ("woa", "copernicus") || error("MAB_BGC_DATA must be woa or copernicus, got $BGC_DATA")
+# MAB_BGC_NO3_SOURCE (default: the source of MAB_BGC_DATA) picks the source of NO₃ alone: with MAB_BGC_DATA=copernicus and
+# MAB_BGC_NO3_SOURCE=woa the nitrate is the WOA climatology (monthly in the top 200 m, annual below 300 m), while O₂, P, DIC and Alk are not changed
+const NO3_SOURCE = (x = get(ENV, "MAB_BGC_NO3_SOURCE", ""); isempty(x) ? BGC_DATA : x)
+NO3_SOURCE in ("woa", "copernicus") || error("MAB_BGC_NO3_SOURCE must be woa or copernicus, got $NO3_SOURCE")
+NO3_SOURCE == "copernicus" && BGC_DATA == "woa" && error("MAB_BGC_NO3_SOURCE=copernicus needs MAB_BGC_DATA=copernicus")
 
 const COPERNICUS_REGION = BoundingBox(longitude = (data_λ[1] - 1, data_λ[2] + 1), latitude = (data_φ[1] - 1, data_φ[2] + 1))
 const COPERNICUS_DIR    = joinpath(DATA_DIR, "copernicus_bgc")
@@ -186,7 +192,9 @@ function bgc_series()
         "$(Dates.format(first(dates), "yyyy-mm-dd")) → $(Dates.format(last(dates), "yyyy-mm-dd")))…")
     if BGC_DATA == "copernicus"
         download_copernicus(dates)
-        data = NamedTuple(tracer => copernicus_series(tracer, dates) for tracer in keys(COPERNICUS_NAMES))
+        NO3_SOURCE == "woa" && say("  NO₃ from WOA, the other tracers from the Copernicus hindcast")
+        data = NamedTuple(tracer => (tracer == :NO₃ && NO3_SOURCE == "woa" ? woa_series(:NO₃, dates) : copernicus_series(tracer, dates))
+                          for tracer in keys(COPERNICUS_NAMES))
         return merge(data, carbonate_from_pH_series(dates))
     else
         data = NamedTuple(tracer => woa_series(tracer, dates) for tracer in keys(WOA_NAMES))
