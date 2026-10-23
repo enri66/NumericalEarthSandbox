@@ -287,6 +287,13 @@ per 6 model hours). Analyses: `bgc/validate_bgc.jl`, `bgc/compare_scaling.jl` (R
   / 0.41 → 0.27, r −0.60 → −0.23 / −0.17 → −0.15; the late bloom spike (2.3 mg/m³ at CNSM on days 37–42) is gone but the model is
   too flat (std model/obs 0.29 / 0.35). Nitrate at 7 m: 1.36 → 1.96 / 0.54 → 0.73 (SUNA 6.5 / 1.5); the unscaled run is driven to zero after
   day 40, the scaled one keeps 1.5–4.7 at CNSM. O₂ unchanged (model 96–98 % saturated, sensors 125–131 %).
+- **Are the river nitrate inputs too low? Not the main problem (budget, 2026-10-23).** Over the 59 days of `bgc_feb19_sc` the rivers delivered
+  6.5e8 mol NO₃ (mean 126 mol/s; plus 4.6e7 mol NH₄ and 1.2e8 mol DON), which spread over the shelf (< 200 m: 9.4e12 m³; < 100 m: 6.8e12 m³) is
+  at most 0.07-0.10 mmol/m³ of nitrate, against a shortfall of 0.8 (ISSM) to 4.6 (CNSM) mmol/m³ at the Pioneer sites; closing it would need
+  rivers 10-60× larger. The Pioneer sites are upstream of the rivers anyway, and the shortfall is there from the start (day 3: CNSM 1.8 vs 6.4
+  SUNA), so it is inherited from the initial and boundary nitrate. Missing river sources would add little: the Connecticut (unrouted) ~17 mol/s,
+  the Chesapeake (Susquehanna 1682 m³/s × 101 mmol/m³ ≈ 170 mol/s, mouth just outside the box) ≈ 8.7e8 mol over the run, +0.09 mmol/m³.
+  Locally the loads may still matter (plume chlorophyll 3-4× below the satellite) — untested.
 - Still open: shelf nitrogen supply (nitrate 3× too low at CNSM), Hudson chemistry is a proxy, the Connecticut River is not routed,
   the offshore chlorophyll excess, the bottom-cell overshoot, the first-month oxygen spin-up.
 - The forks' `everything` moved to Oceananigans 0.114 on 2026-10-21; `mpi05_bgc` still has the earlier manifest (these runs used it).
