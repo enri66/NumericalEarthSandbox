@@ -272,7 +272,7 @@ Compared with `bgc_feb19_cmb` (same setup, no river loads, NO₃ bound 30): `bgc
 
 Run with BGC_BOUNDS="NO₃:0:150,O₂:50:500,DIC:0:2300", Copernicus data, `MAB_BGC_SCALE_NEGATIVES=true`; 4 triton24 nodes, ~33 h (460–550 s
 per 6 model hours). Analyses: `bgc/validate_bgc.jl`, `bgc/compare_scaling.jl` (RUN_A=rc4, RUN_B=sc), `bgc/chl_comparison.jl`
-(figures and animation of three runs; copies in `analysis_bgc_feb19/`, not committed: PNGs and a 4 MB mp4).
+(figures and animation of three runs; figures and the mp4 in `~/Data/mab_analysis/bgc/`, not committed).
 - **Negative ammonium is gone**: 0.0 % of the wet cells and surface columns on every day (the unscaled run goes from 0.2 % of
   the wet cells on day 3 to 21.9 % on day 56, and from 0.9 % to 41 % of the surface columns); minimum NH₄ ≈ 0.
   Nitrogen total differs from the unscaled run by +4e-7 (day 3) growing to +2.6e-4 (day 56).
