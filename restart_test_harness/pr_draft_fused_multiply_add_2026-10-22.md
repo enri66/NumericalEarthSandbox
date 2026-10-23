@@ -11,7 +11,7 @@ Diff: Project.toml +2, src/Advection/Advection.jl +30/-1, test/unit/fused_multip
 ## What this adds
 
 A `fused_multiply_add` preference for Oceananigans with the values `"muladd"` (the default, so nothing changes unless it
-is set) and `"fma"`. The Advection module's `@muladd` expands as `MuladdMacro.@muladd` does; with `"fma"` every `muladd`
+is set) and `"fma"`. The Advection module's `@fused_muladd` expands as `MuladdMacro.@muladd` does; with `"fma"` every `muladd`
 it generates is replaced by a fused multiply-add that always fuses. `BFloat16`, which has no `fma`, fuses in `Float32`,
 and mixed argument types are promoted first. An unknown value is an error. It is set with
 `Preferences.set_preferences!(Oceananigans, "fused_multiply_add" => "fma")` and read when Oceananigans is compiled; the
