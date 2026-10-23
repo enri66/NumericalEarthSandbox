@@ -294,6 +294,18 @@ per 6 model hours). Analyses: `bgc/validate_bgc.jl`, `bgc/compare_scaling.jl` (R
   SUNA), so it is inherited from the initial and boundary nitrate. Missing river sources would add little: the Connecticut (unrouted) ~17 mol/s,
   the Chesapeake (Susquehanna 1682 m³/s × 101 mmol/m³ ≈ 170 mol/s, mouth just outside the box) ≈ 8.7e8 mol over the run, +0.09 mmol/m³.
   Locally the loads may still matter (plume chlorophyll 3-4× below the satellite) — untested.
+- **Where the shelf nitrate shortfall comes from: the Copernicus input (`bgc/nitrate_sources.jl`, 2026-10-23).** Nitrate at 7 m at the Pioneer sites
+  (mmol/m³), SUNA / raw Copernicus (nearest 1/4° column, 108 m deep) / the model's pipeline (inpainted, interpolated) / WOA 2023 monthly (× 1.025):
+  CNSM: Jan 25-31 6.30 / Jan 2.71 / 2.81 / 6.46; Feb 5.53 / 1.09 / 1.09 / 4.64; Mar 7.48 / 0.90 / 1.18 / 3.17; Apr – / 0.06 / 0.10 / 2.74.
+  ISSM: Jan 1.61 / 2.72 / 2.00 / 6.96; Feb 1.51 / 1.03 / 0.92 / 4.91; Mar 1.76 / 1.04 / 0.72 / 3.38; Apr – / 0.05 / 0.06 / 2.82.
+  Model initial value (Feb 1, 7 m): CNSM 1.87, ISSM 1.41. Mid-Feb profile at 7, 25, 50, 100 m: CNSM Copernicus 1.1, 1.2, 1.7, 2.5 vs WOA 4.6, 4.7, 5.3, 8.2;
+  ISSM Copernicus 1.0, 1.2, 1.6, 2.8 vs WOA 4.9, 4.9, 5.6, 8.6.
+  - The pipeline (inpainting, interpolation) does not change the data (1.09 → 1.09); the shortfall at CNSM is in the Copernicus hindcast itself.
+  - The hindcast has almost no cross-shelf nitrate gradient (CNSM 1.09, ISSM 1.03 in February) where the sensors show 5.5 against 1.5; WOA matches CNSM
+    in Jan-Feb (6.5, 4.6) but is far too high at the inshore ISSM (4.9-7.0 vs 1.5): at 1° it mixes in slope water. Neither product resolves the shelf-break nitrate gradient.
+  - The hindcast's nitrate is drawn to ~0 by April (2.7 → 1.1 → 0.9 → 0.06) while SUNA stays at 7.5 (CNSM) in March; at 100 m it has 2.5-2.8 where WOA has 8-8.6.
+  - So the model's nitrate follows its Copernicus initial and boundary values; the river loads and the scaling cannot repair this. Candidates: nitrate
+    from WOA below the surface layer, a blend of the two, or nitrate from a nitrate-density relation fitted to WOA/SUNA.
 - Still open: shelf nitrogen supply (nitrate 3× too low at CNSM), Hudson chemistry is a proxy, the Connecticut River is not routed,
   the offshore chlorophyll excess, the bottom-cell overshoot, the first-month oxygen spin-up.
 - The forks' `everything` moved to Oceananigans 0.114 on 2026-10-21; `mpi05_bgc` still has the earlier manifest (these runs used it).
