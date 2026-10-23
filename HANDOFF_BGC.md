@@ -306,6 +306,16 @@ per 6 model hours). Analyses: `bgc/validate_bgc.jl`, `bgc/compare_scaling.jl` (R
   - The hindcast's nitrate is drawn to ~0 by April (2.7 → 1.1 → 0.9 → 0.06) while SUNA stays at 7.5 (CNSM) in March; at 100 m it has 2.5-2.8 where WOA has 8-8.6.
   - So the model's nitrate follows its Copernicus initial and boundary values; the river loads and the scaling cannot repair this. Candidates: nitrate
     from WOA below the surface layer, a blend of the two, or nitrate from a nitrate-density relation fitted to WOA/SUNA.
+- **Nitrate from density does not work (`bgc/nitrate_density_fit.jl`, 2026-10-23).** Nitrate as a non-decreasing function of σ = ρ(Θ, Sᴬ, 0) − 1000 from WOA 2023
+  monthly medians (σ bins of 0.1; box -76..-64°E 34..42°N, shallower than 800 m): in-sample r² 0.81-0.86 (rms 2.3-3.3 mmol/m³), but that skill is in the deep water
+  (σ > 27: 4-12 mmol/m³); at σ = 26 the table gives 1.0-2.8 (Feb 1.0). Test at 7 m, 2019-02-01 → 03-31, against SUNA (CNSM / ISSM):
+  mean SUNA 6.59 / 1.53; from GLORYS T,S 1.57 / 1.56 (bias −5.0 / +0.04, r −0.19 / +0.45); from the optode's own T,S 1.85 / 1.73 (bias −4.7 / +0.2, r +0.59 / +0.46).
+  CNSM has 5.5-7.5 mmol/m³ at σ = 26.07, where WOA's box-wide relation gives 1-2.3 (Gulf Stream and Sargasso water of that density has no nitrate). Restricting the fit to
+  the shelf columns (WOA data ending shallower than 500 m, 145 samples) gives an almost flat 4-5 in February: CNSM bias −2.5 (r −0.8), ISSM +2.4 (r −0.1/−0.3).
+  Nitrate is not a function of density here: at CNSM it is highest when the water is colder and fresher (daily r with T −0.74, with S −0.57; mean NO₃ 6.6 ± 1.2, T 6.9, S 33.3), at ISSM
+  the sign flips (r with S +0.43; NO₃ 1.7 ± 0.7). GLORYS σ at the sites also differs from the mooring's (CNSM 25.90 ± 0.39 vs 26.07 ± 0.09, r between the series 0.32). Not
+  implemented in the model; the Copernicus nitrate stays. Remaining options: nitrate from WOA (right at CNSM, 4.6-6.5; too high at ISSM, 4.9-7.0), a shelf-water mixing
+  line (nitrate vs T and S for the cold fresh shelf water), or nudging the shelf nitrate to the SUNA seasonal means.
 - Still open: shelf nitrogen supply (nitrate 3× too low at CNSM), Hudson chemistry is a proxy, the Connecticut River is not routed,
   the offshore chlorophyll excess, the bottom-cell overshoot, the first-month oxygen spin-up.
 - The forks' `everything` moved to Oceananigans 0.114 on 2026-10-21; `mpi05_bgc` still has the earlier manifest (these runs used it).
