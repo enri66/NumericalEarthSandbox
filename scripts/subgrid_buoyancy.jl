@@ -1,11 +1,10 @@
 # The unresolved buoyancy variance and the diffusivity-stratification covariance, measured in a fine run by averaging it
-# over boxes of r × r cells, against the estimates of G. Wagner, "Unresolved restratification and the CATKE energy
-# budget" (10 Oct 2026):
-#   χ = ½ (b′)‾  within each box, against the gradient estimate (his eq. 2.7) from the box-mean buoyancy b̄,
+# over boxes of r × r cells, against the proposed estimates:
+#   χ = ½ (b′)‾  within each box, against the gradient estimate from the box-mean buoyancy b̄,
 #       χ_g = (Δx² (∂x b̄)² + Δy² (∂y b̄)²) / 24,  Δx, Δy the box widths;
-#   𝒥_b = −(κ′γ′)‾ = −[(κc N²)‾ − κ̄c N̄²]  at the faces (γ = N²), his covariance correction to the averaged CATKE flux;
-#       his closure (eq. 2.10) is 𝒥_b = −C_Δ Δ |∇ₕb̄| √ē, so C_Δ = −𝒥_b / (Δ |∇ₕb̄| √ē) is what the run implies, and
-#       C_χ = −𝒥_b / √(2χ ē) with the measured χ (eq. 2.9).
+#   𝒥_b = −(κ′γ′)‾ = −[(κc N²)‾ − κ̄c N̄²]  at the faces (γ = N²), the covariance correction to the averaged CATKE flux;
+#       the proposed closure is 𝒥_b = −C_Δ Δ |∇ₕb̄| √ē, so C_Δ = −𝒥_b / (Δ |∇ₕb̄| √ē) is what the run implies, and
+#       C_χ = −𝒥_b / √(2χ ē) with the measured χ.
 # Bars are means over the r × r cells of a box at one level (boxes with any dry cell at that level are left out).
 # Values are averaged over the lower half of the box's mixed layer (h̄/2 to h̄, h̄ the mean mixed-layer depth of its
 # columns, mab_analysis_common.jl) and binned by region and by quartile of |∇ₕb̄|. Also the resolved horizontal
@@ -110,7 +109,7 @@ for day in days
         end
         Dx = [r * dx[(J-1)*r + (r+1)÷2] for J in 1:NY]; Dy = r * dy
         ∇b̄ = gradient_magnitude(b̄, Dx, Dy)
-        # gradient estimate of χ (eq. 2.7), with the x and y parts of the gradient taken separately
+        # gradient estimate of χ, with the x and y parts of the gradient taken separately
         χg = fill(NaN, NX, NY, Nz)
         for k in 1:Nz, J in 1:NY, I in 1:NX
             isfinite(b̄[I, J, k]) || continue

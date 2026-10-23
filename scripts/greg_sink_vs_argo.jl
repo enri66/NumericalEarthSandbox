@@ -1,12 +1,12 @@
 # Where would the proposed CATKE restratification sink act, compared with where the mixed layer is too deep? The sink
-# (G. Wagner, "Unresolved restratification and the CATKE energy budget", 10 Oct 2026, eq. 2.10) is
+# (a closure term proposed for CATKE) is
 #   𝒥_b = −C_Δ Δ |∇ₕb| √e,
 # Δ the grid spacing. For a script-05 run made with MAB_CATKE_OUTPUT=true, each Argo profile (argo_common.jl) is paired
 # with the model's daily column there, and over the lower half of the model's mixed layer (h/2 to h) we take
 #   G = Δ |∇ₕb| √e        (the sink per unit C_Δ; b = −g σ₀/ρ₀ from the de-tided daily T and S, ∇ₕb along levels)
 #   κc N²                  CATKE's buoyancy sink
 #   κc S²                  a lower bound on CATKE's shear production κu S² (κu is not in the daily output)
-#   ℓc = κc / √e           with the covariance bound (eq. 2.4) C_Δ ≤ ℓc / (√12 h_χ)
+#   ℓc = κc / √e           with the covariance bound C_Δ ≤ ℓc / (√12 h_χ)
 # from the daily means of catke_diagnostics.jl. κc N², κc S² and ℓc are products of daily means, which overstate them
 # where κc is episodic (night-time convection, storms); tke_resolution.jl has the instantaneous values from checkpoints. The profiles are binned by quartile of the lower-mixed-layer |∇ₕb|, per
 # month, with the median mixed-layer depth bias against Argo in each bin. Usage:

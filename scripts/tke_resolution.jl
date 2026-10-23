@@ -1,6 +1,6 @@
 # Near-surface TKE at several horizontal resolutions, and the size of the submesoscale restratification sink proposed
-# for CATKE (G. Wagner, "Unresolved restratification and the CATKE energy budget", 10 Oct 2026),
-#   𝒥_b = −C_Δ Δ |∇ₕb| √e     (his eq. 2.10; Δ the grid spacing, C_Δ a dimensionless coefficient).
+# for CATKE,
+#   𝒥_b = −C_Δ Δ |∇ₕb| √e     (Δ the grid spacing, C_Δ a dimensionless coefficient).
 #
 # Reads the checkpoints of script-05 runs (instantaneous T, S, u, v, e, κc, κu, written every MAB_CHECKPOINT_EVERY days)
 # at the days found in all of them. For every wet column it takes the mixed-layer depth h of mab_analysis_common.jl and
@@ -9,7 +9,7 @@
 #   G = Δ |∇ₕb| √e          the proposed sink per unit C_Δ (b = −g σ₀/ρ₀, ∇ₕb along model levels)
 #   κc N²                   CATKE's own buoyancy sink (stable stratification)
 #   P = κu S²               CATKE's shear production
-#   ℓc = κc / √e            CATKE's tracer mixing length; the covariance bound (his eq. 2.4) allows at most
+#   ℓc = κc / √e            CATKE's tracer mixing length; the covariance bound allows at most
 #                           C_Δ ≤ ℓc / (√12 h_χ), for a vertical scale h_χ of the unresolved buoyancy variance
 # Columns mixed to within 10 % of the bottom are left out (their lower mixed layer is the bottom boundary layer), as is
 # a band of MAB_EDGE_DEG degrees along the domain edges (sponges). Each run's column values are averaged onto the
@@ -211,7 +211,7 @@ for (reg, rname) in enumerate(regions), (k, r) in enumerate(runs)
             1e8 * med(sel(blk[k][:∇b_low], reg)), 1e9 * med(G), 1e9 * med(Bv), 1e9 * med(Pv), med(G ./ Bv), med(G ./ Pv), med(ℓ),
             med(ℓ) / (sqrt(12) * 10))
 end
-println("   (|∇ₕb| and G at each run's own resolution, averaged onto the common blocks; C_Δ max h10 = ℓc/(√12·10 m), the eq. 2.4 bound for h_χ = 10 m)")
+println("   (|∇ₕb| and G at each run's own resolution, averaged onto the common blocks; C_Δ max h10 = ℓc/(√12·10 m), the covariance bound for h_χ = 10 m)")
 
 finest = argmax([r.Nx for r in runs])
 println("\n3. TKE excess of each coarser run over $(runs[finest].name), lower half of the ML, against the coarser run's G")
