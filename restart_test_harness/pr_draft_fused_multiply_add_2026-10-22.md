@@ -12,8 +12,9 @@ Diff: Project.toml +2, src/Advection/Advection.jl +30/-1, test/unit/fused_multip
 
 A `fused_multiply_add` preference for Oceananigans with the values `"muladd"` (the default, so nothing changes unless it
 is set) and `"fma"`. The Advection module's `@fused_muladd` expands as `MuladdMacro.@muladd` does; with `"fma"` every `muladd`
-it generates is replaced by a fused multiply-add that always fuses. `BFloat16`, which has no `fma`, fuses in `Float32`,
-and mixed argument types are promoted first. An unknown value is an error. It is set with
+it generates is replaced by `fma`, which always fuses. `BFloat16` takes its `fma` from BFloat16s.jl
+(JuliaMath/BFloat16s.jl#106, merged and not yet released), so with `"fma"` it needs a BFloat16s newer than 0.6.2.
+An unknown value is an error. It is set with
 `Preferences.set_preferences!(Oceananigans, "fused_multiply_add" => "fma")` and read when Oceananigans is compiled; the
 choice is documented in the simulation tips.
 
@@ -37,8 +38,10 @@ Timing, 30 steps of the ocean-only case on one rank: 3.17 and 3.22 s per step wi
 
 ## Tests
 
-`test/unit/fused_multiply_add.jl` checks that the fused operation rounds once in Float32 and Float64, accepts mixed and
-BFloat16 arguments, and that the `muladd` calls of the macro's expansion are replaced. The weno_smoothness,
+`test/unit/fused_multiply_add.jl` checks that the `muladd` calls of the macro's expansion are replaced by `fma` or kept,
+and that an unknown preference is an error. The weno_smoothness,
 bounds_preserving_advection, materialize_advection and immersed_advection tests pass with each value of the preference.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
