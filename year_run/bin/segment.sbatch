@@ -1,7 +1,5 @@
 #!/bin/bash
 #SBATCH -J mabyear
-#SBATCH -p triton16
-#SBATCH -N 25
 #SBATCH --ntasks-per-node=1
 #SBATCH --exclusive
 #SBATCH -o /t0/workdir/enrique/year_run/out/logs/seg_%j.log
@@ -16,7 +14,17 @@ echo "=== segment $SEGMENT job $SLURM_JOB_ID nodes: $SLURM_JOB_NODELIST  pickup:
 PRUNER=$!
 MPIX=""
 for v in $(compgen -e | grep '^MAB_'); do MPIX="$MPIX -x $v"; done
-mpirun -np $SLURM_NNODES --map-by ppr:1:node --bind-to none -x LD_LIBRARY_PATH -x PATH -x JULIA_DEPOT_PATH -x MPITRAMPOLINE_LIB -x MPITRAMPOLINE_MPIEXEC $MPIX \
+# one rank per triton16 node, three per triton48 node (node53-56), the triton48 nodes last
+HF=$OUT/hostfile_$SLURM_JOB_ID
+rm -f $HF
+for n in $(scontrol show hostnames $SLURM_JOB_NODELIST); do
+    case $n in node5[3-6]) ;; *) echo "$n slots=1" >> $HF ;; esac
+done
+for n in $(scontrol show hostnames $SLURM_JOB_NODELIST); do
+    case $n in node5[3-6]) echo "$n slots=3" >> $HF ;; esac
+done
+echo "ranks: $NRANKS  hostfile: $(tr '\n' ' ' < $HF)"
+mpirun -np $NRANKS --hostfile $HF --map-by slot --bind-to none -x LD_LIBRARY_PATH -x PATH -x JULIA_DEPOT_PATH -x MPITRAMPOLINE_LIB -x MPITRAMPOLINE_MPIEXEC $MPIX \
     julia -t $THREADS --project=$ENVDIR $SCRIPT
 status=$?
 kill $PRUNER 2>/dev/null
