@@ -322,6 +322,11 @@ per 6 model hours). Analyses: `bgc/validate_bgc.jl`, `bgc/compare_scaling.jl` (R
   ISSM nitrate 0.73 → 5.44 (SUNA 1.54): bias −0.81 → +3.90, rms 1.19 → 4.01; ISSM chlorophyll 0.81 → 1.01 (0.62). Maximum NO₃ 36.2 on the last day (overshoot unchanged).
   So WOA fixes CNSM and breaks ISSM, as the data comparison predicted. Raising the CNSM nitrate by 2.6 mmol/m³ raised its chlorophyll by 10 % and the shelf mean by 22 %: the shelf chlorophyll deficit
   (satellite 2.3× the model) is not mainly a nitrate deficit in Feb-Mar (light and mixing are the untested candidates; near the coast the satellite is also high).
+  Time structure (figure `pioneer_runs.png`): at CNSM the WOA-nitrate run follows SUNA well from day 3 to day ~28 (model 5.5 → 4.9, SUNA 6.4 → 4.5 → 5), then SUNA rises to 7.5-8 (days 28-40) while the model stays near 5 and falls to 2.4-4 after day 45: the late
+  nitrate-rich intrusion is missed. At ISSM the model decreases slowly from 6.1 to 4.5 while SUNA oscillates between 0.3 and 2.6 (peaks near days 11, 21, 40, 52): the cross-shelf gradient (SUNA CNSM 5.5-7.5 vs ISSM 1.5 only 35 km apart) is in neither data product and is not created by the model in 8 weeks.
+  Off the shelf the WOA and Copernicus nitrate runs have identical chlorophyll (slope, deep): the offshore excess (model 0.5 vs satellite 0.3 mg/m³) is not controlled by nitrate; on the shelf the WOA run is higher by a nearly constant 0.1-0.15 mg/m³ from day 3 on.
+  CNSM chlorophyll: neither run reproduces the fluorometer's rise to 1.5 mg/m³ on days 10-25 or its fall to 0.65 afterwards (the WOA run rises to 1.2-1.3 on days 37-49: r −0.42); ISSM chlorophyll stays near 1.0 where the fluorometer falls from 0.8 to 0.3.
+  Next diagnostic: the limitation terms of LOBSTER's growth (light, NO₃, NH₄) and the PAR and mixed-layer depth at CNSM, to see what limits the shelf phytoplankton in Feb-Mar.
 - Still open: shelf nitrogen supply (nitrate 3× too low at CNSM), Hudson chemistry is a proxy, the Connecticut River is not routed,
   the offshore chlorophyll excess, the bottom-cell overshoot, the first-month oxygen spin-up.
 - The forks' `everything` moved to Oceananigans 0.114 on 2026-10-21; `mpi05_bgc` still has the earlier manifest (these runs used it).
