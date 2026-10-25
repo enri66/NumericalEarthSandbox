@@ -316,6 +316,12 @@ per 6 model hours). Analyses: `bgc/validate_bgc.jl`, `bgc/compare_scaling.jl` (R
   the sign flips (r with S +0.43; NO₃ 1.7 ± 0.7). GLORYS σ at the sites also differs from the mooring's (CNSM 25.90 ± 0.39 vs 26.07 ± 0.09, r between the series 0.32). Not
   implemented in the model; the Copernicus nitrate stays. Remaining options: nitrate from WOA (right at CNSM, 4.6-6.5; too high at ISSM, 4.9-7.0), a shelf-water mixing
   line (nitrate vs T and S for the cold fresh shelf water), or nudging the shelf nitrate to the SUNA seasonal means.
+- **WOA nitrate in the model (`bgc_feb19_woa`, finished 2026-10-24; as `bgc_feb19_sc` but `MAB_BGC_NO3_SOURCE=woa`; figures in `~/Data/mab_analysis/bgc/validation_woa` and `chl_comparison_woa_vs_copernicus_nitrate`).**
+  Copernicus nitrate → WOA nitrate, 59 days: shelf chlorophyll 0.86 → 1.05 mg/m³ (satellite 2.39), log10 bias −0.31 → −0.22, rms 0.45 → 0.40, r 0.30 → 0.29; slope 0.80 → 0.83 and deep 0.53 → 0.52 unchanged;
+  whole domain r 0.63 → 0.72, rms 0.40 → 0.37. CNSM nitrate at 7 m 1.96 → 4.59 (SUNA 6.52): bias −4.56 → −1.92, rms 4.76 → 2.53, but r −0.04 → −0.49; CNSM chlorophyll 0.91 → 1.00 (fluorometer 0.96).
+  ISSM nitrate 0.73 → 5.44 (SUNA 1.54): bias −0.81 → +3.90, rms 1.19 → 4.01; ISSM chlorophyll 0.81 → 1.01 (0.62). Maximum NO₃ 36.2 on the last day (overshoot unchanged).
+  So WOA fixes CNSM and breaks ISSM, as the data comparison predicted. Raising the CNSM nitrate by 2.6 mmol/m³ raised its chlorophyll by 10 % and the shelf mean by 22 %: the shelf chlorophyll deficit
+  (satellite 2.3× the model) is not mainly a nitrate deficit in Feb-Mar (light and mixing are the untested candidates; near the coast the satellite is also high).
 - Still open: shelf nitrogen supply (nitrate 3× too low at CNSM), Hudson chemistry is a proxy, the Connecticut River is not routed,
   the offshore chlorophyll excess, the bottom-cell overshoot, the first-month oxygen spin-up.
 - The forks' `everything` moved to Oceananigans 0.114 on 2026-10-21; `mpi05_bgc` still has the earlier manifest (these runs used it).
@@ -334,6 +340,16 @@ per 6 model hours). Analyses: `bgc/validate_bgc.jl`, `bgc/compare_scaling.jl` (R
   - Cost: about 2× per step (460–550 s per 6 model hours against 207–215 s), so a 59-day run takes about 30 h instead of 15.
   - The earlier chlorophyll conclusions (shelf 1.3–2.4× too low) were flattered by the negative NH₄: with scaling the shelf is
     up to 3× too low, which points again at the shelf nitrogen supply.
+
+## BGC environment update (2026-10-25)
+
+`/t0/workdir/enrique/mpi05_bgc` (triton) updated from Oceananigans 0.113.5 / NumericalEarth 0.8.1 / OceanBioME 0.19.4 / ClimaSeaIce 0.5.10 (fork branch `substep-halo-exchange`) to
+**Oceananigans 0.114.0** (fork `everything`, tree 0d6cafe0, includes the always-fma change), **NumericalEarth 0.8.2** (fork `everything` 5cee74ae, tree cff71a8e: contains the sea-ice fix d9dfcbf6 and the Copernicus reader
+fe421393, upstream `main` merged), **OceanBioME 0.20.2** (0.19.4 only allows Oceananigans 0.113.3), **ClimaSeaIce 0.5.12** (fork branch `substep-halo-exchange-0.5.12`, as in `mpi05_bgc_114`; NumericalEarth now needs ≥ 0.5.12).
+WorldOceanAtlasTools 0.6.5 and CopernicusMarine 0.2.0 unchanged. Old files: `Project.toml.bak-2026-10-25`, `Manifest.toml.bak-2026-10-25` (and the 10-15, 10-20 ones): every `bgc_feb19_*` run used the old stack.
+- Only for triton24/triton48 nodes: triton16 has no FMA hardware (the year-long run keeps its frozen `env_old` for that reason).
+- Checks on the new stack: precompile and load of all packages, the LOBSTER + scale-negatives column test (identical numbers), the Copernicus/WOA readers (`bgc/nitrate_sources.jl`, identical numbers); the full model script: see the test below.
+- `mpi05_bgc_114` (made by the main session on 2026-10-21) and `mpi05_bgc_cmems` (the reader branch before it was on the fork) are untouched; `mpi05_bgc_cmems` is obsolete.
 
 ## Practical notes
 
