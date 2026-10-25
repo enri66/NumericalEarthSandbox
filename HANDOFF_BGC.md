@@ -356,6 +356,12 @@ WorldOceanAtlasTools 0.6.5 and CopernicusMarine 0.2.0 unchanged. Old files: `Pro
 - Checks on the new stack: precompile and load of all packages, the LOBSTER + scale-negatives column test (identical numbers), the Copernicus/WOA readers (`bgc/nitrate_sources.jl`, identical numbers); the full model script: see the test below.
 - `mpi05_bgc_114` (made by the main session on 2026-10-21) and `mpi05_bgc_cmems` (the reader branch before it was on the fork) are untouched; `mpi05_bgc_cmems` is obsolete.
 
+**Full-model test on the new stack (job 12210, `bgc_env114_test2`, 4 triton24 nodes, 1 day from 2019-02-01, same flags as `bgc_feb19_woa`; 2026-10-25).** The first attempt (12208) failed in `dic_from_pH` because OceanBioME 0.20 renamed the `CarbonChemistry` keyword `P` to `water_pressure`; commit 2198a19 makes the keyword version-dependent. The second runs the whole day. At 2019-02-01 00:00 the ranges equal the old stack's (NO₃ 0.0877-25.13, P 0.00185-2.744, O₂ 131-366.4); DIC and Alk differ slightly (DIC 233-2167 against 231-2169, Alk 246-2424 against 244-2419) because the new pressure keyword and package versions move the carbonate solution at the sub-percent level; the 6-hourly ranges of NO₃, P, Z and O₂ afterwards agree to 3 digits, and the step time is unchanged (about 420 s per 6 h of model time). The new stack is fine for new runs; runs to be compared with the `bgc_feb19_*` set should keep using `mpi05_bgc_old` (= the `.bak-2026-10-25` Project and Manifest, made 2026-10-25).
+
+## Growth limitation diagnostic (2026-10-25)
+
+`MAB_BGC_LIMITATION=true` (`LIMITATION=true` in `bgc_run.sbatch`; `bgc/bgc_limitation.jl`) writes, as daily means of hourly samples in the top `MAB_BGC_LIMITATION_LEVELS` (12, down to 49 m) levels, PAR, the light term PAR/(k_PAR+PAR), the nitrate term NO₃ exp(-ψNH₄)/(NO₃+k_NO₃), the ammonium term, the temperature factor (1 in LOBSTER) and the growth rate μ₀ L_light L_N (1/day) of the phytoplankton, to `<TAG>_bgc_limitation_rank<r>.jld2`. Restart `bgc_feb19_woa_lim` (job 12211): from the day-35 checkpoint of `bgc_feb19_woa` on the old stack (`mpi05_bgc_old`), to day 50. `bgc/limitation_analysis.jl` reads it with the daily T, S (mixed-layer depth from Δσ = 0.03 kg/m³ against 10 m, Roquet simplified EOS) and prints means at CNSM, ISSM and the shelf/slope/deep regions, the share of light- against nutrient-limited cell-days, and maps/time series/profiles.
+
 ## Practical notes
 
 - Sandbox: `~/Dropbox/Models/NumericalEarthSandbox` (Mac) and `/t0/workdir/enrique/Models/NumericalEarthSandbox`
