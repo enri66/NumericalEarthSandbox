@@ -202,8 +202,11 @@ function bgc_series()
     end
 end
 
+# OceanBioME 0.20 renamed the pressure keyword of CarbonChemistry from P to water_pressure (bar, gauge: zero at the surface)
+const CARBON_PRESSURE_KEYWORD = pkgversion(OceanBioME) ≥ v"0.20" ? :water_pressure : :P
+
 function dic_from_pH(pHᵗ, Alk, T, S; P = 0.0, carbon_chemistry = CarbonChemistry(), tolerance = 1e-4)
-    pH(DIC) = carbon_chemistry(; DIC, Alk, T, S, P, output = Val(:pHᵗ))
+    pH(DIC) = carbon_chemistry(; DIC, Alk, T, S, output = Val(:pHᵗ), (CARBON_PRESSURE_KEYWORD => P,)...)
     lo, hi = 0.5 * Alk, 1.2 * Alk
     (pH(lo) ≥ pHᵗ ≥ pH(hi)) || return NaN
     while hi - lo > tolerance
