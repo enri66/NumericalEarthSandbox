@@ -933,6 +933,8 @@ sediment_kw = BGC_SEDIMENT ? (; sediment = InstantRemineralisationSediment(grid;
 const BGC_SCALE_NEGATIVES = get(ENV, "MAB_BGC_SCALE_NEGATIVES", "false") == "true"
 biogeochemistry = LOBSTER(grid; surface_PAR = PARFromShortwave(grid), oxygen = Oxygen(), inorganic_carbon = CarbonateSystem(),
                           scale_negatives = BGC_SCALE_NEGATIVES, invalid_fill_value = 0.0, sediment_kw...)
+const LIMITATION = get(ENV, "MAB_BGC_LIMITATION", "false") == "true"
+const LIMITATION_LEVELS = parse(Int, get(ENV, "MAB_BGC_LIMITATION_LEVELS", "12"))
 BGC_SCALE_NEGATIVES && say("negative BGC tracers scaled (ScaleNegativeTracers, conserved groups, invalid cells set to zero)")
 const BGC_TRACERS = required_biogeochemical_tracers(biogeochemistry)
 say("biogeochemistry: LOBSTER + O₂ + carbonate system, tracers $(join(BGC_TRACERS, ", ")), seafloor remineralisation $(BGC_SEDIMENT ? "on" : "off")")
@@ -1512,6 +1514,18 @@ simulation.output_writers[:bgc_surface_daily] = JLD2Writer(oc, bgc_surface;
 simulation.output_writers[:bgc_volume_daily] = JLD2Writer(oc, bgc_volume;
     filename = joinpath(@__DIR__, "..", TAG * "_bgc_volume_daily.jld2"),
     schedule = FilteredTimeInterval(LanczosKernel(6days; cutoff = 40hours); interval = 1days), overwrite_files = fresh_start)
+LIMITATION && include(joinpath(@__DIR__, "bgc_limitation.jl"))
+# MAB_BGC_LIMITATION=true: daily means of hourly samples of PAR, the light, nitrate and ammonium limitation terms, the
+# temperature factor and the specific growth rate (1/day) of LOBSTER's phytoplankton in the top LIMITATION_LEVELS levels
+# (the euphotic zone; the whole column of each would be ~6 fields × 280 MB a day)
+if LIMITATION
+    kr = grid.Nz - LIMITATION_LEVELS + 1 : grid.Nz
+    limitation_fields = NamedTuple(name => Field(op; indices = (:, :, kr)) for (name, op) in pairs(limitation_outputs(oc, biogeochemistry)))
+    simulation.output_writers[:bgc_limitation] = JLD2Writer(oc, limitation_fields;
+        filename = joinpath(@__DIR__, "..", TAG * "_bgc_limitation.jld2"),
+        schedule = AveragedTimeInterval(1days; stride = round(Int, 3600 / Δt_baroclinic)), overwrite_files = fresh_start)
+    say("growth-limitation diagnostics: top $LIMITATION_LEVELS levels, daily means of hourly samples")
+end
 simulation.output_writers[:eta] = JLD2Writer(oc, η_out;
     filename = joinpath(@__DIR__, "..", TAG * "_eta.jld2"),
     schedule = TimeInterval(1hours), overwrite_files = fresh_start)
