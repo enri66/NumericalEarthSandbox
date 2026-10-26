@@ -9,7 +9,7 @@
 # mpi05_bgc; mpi05_bgc_cmems has the NumericalEarth with CopernicusBGCMonthly) and SANDBOX (the sandbox copy to run
 # from, default /t0/workdir/enrique/Models/NumericalEarthSandbox), BGC_BOUNDS (MAB_BGC_BOUNDS, e.g. "NO₃:0:30,O₂:50:450";
 # it has commas, so export it in the shell before sbatch rather than in --export), PICKUP (MAB_PICKUP), RIVER_LOADS
-# (MAB_RIVER_LOADS, default true: the river water carries tracers), SCALE_NEGATIVES (MAB_BGC_SCALE_NEGATIVES, default false), LIMITATION (MAB_BGC_LIMITATION, default false: daily growth-limitation terms in <tag>_bgc_limitation.jld2), NO3_SOURCE (MAB_BGC_NO3_SOURCE: woa takes NO₃ from WOA when BGC_DATA=copernicus), RIVER_CHEMISTRY (MAB_RIVER_CHEMISTRY: rc4uscoast, the
+# (MAB_RIVER_LOADS, default true: the river water carries tracers), SCALE_NEGATIVES (MAB_BGC_SCALE_NEGATIVES, default false), LIMITATION (MAB_BGC_LIMITATION, default false: daily growth-limitation terms in <tag>_bgc_limitation.jld2), PAR_FRACTION (MAB_BGC_PAR_FRACTION, default 0.43) and WATER_BLUE_ATTENUATION (MAB_BGC_WATER_BLUE_ATTENUATION, default 0.0232 1/m) for light-sensitivity runs, NO3_SOURCE (MAB_BGC_NO3_SOURCE: woa takes NO₃ from WOA when BGC_DATA=copernicus), RIVER_CHEMISTRY (MAB_RIVER_CHEMISTRY: rc4uscoast, the
 # default, = monthly NO₃, NH₄, DOM, Alk, DIC and O₂ from RC4USCoast in Data/RC4USCoast; or assumed = constant NO₃ from
 # RIVER_NO3 (MAB_RIVER_NO3, default "Hudson:50,Delaware:50,other:20" mmol/m³; export it in the shell like BGC_BOUNDS) and
 # fresh-water O₂). Bounds that include the river values: BGC_BOUNDS="NO₃:0:150,O₂:50:500,DIC:0:2300".
@@ -28,10 +28,10 @@ export MAB_START_DATE=$START MAB_DAYS=$DAYS MAB_PARTITION_X=$PX MAB_PARTITION_Y=
        MAB_MOORINGS=pioneer MAB_MASK_CLEANUP=true MAB_RIVERS=${RIVERS:-true} MAB_SSS_PISTON=0.5 MAB_SSS_RIVER_MASK=30,100 \
        MAB_TAG=/t0/workdir/enrique/runs/bgc/$RUN_TAG MAB_BOTTOM=partial MAB_ZSTAR=true MAB_TRACER_BOUNDS=T:-2:31,S:0:37.2 \
        MAB_STAGE=${STAGE:-run} MAB_PCO2=${PCO2:-411} MAB_BGC_DATA=${BGC_DATA:-woa} MAB_BGC_BOUNDS=${BGC_BOUNDS:-} MAB_PICKUP=${PICKUP:-false} \
-       MAB_BGC_NO3_SOURCE=${NO3_SOURCE:-} MAB_BGC_SCALE_NEGATIVES=${SCALE_NEGATIVES:-false} MAB_BGC_LIMITATION=${LIMITATION:-false} MAB_RIVER_LOADS=${RIVER_LOADS:-true} MAB_RIVER_CHEMISTRY=${RIVER_CHEMISTRY:-rc4uscoast} MAB_RIVER_NO3=${RIVER_NO3:-Hudson:50,Delaware:50,other:20}
+       MAB_BGC_NO3_SOURCE=${NO3_SOURCE:-} MAB_BGC_SCALE_NEGATIVES=${SCALE_NEGATIVES:-false} MAB_BGC_LIMITATION=${LIMITATION:-false} MAB_BGC_PAR_FRACTION=${PAR_FRACTION:-0.43} MAB_BGC_WATER_BLUE_ATTENUATION=${WATER_BLUE_ATTENUATION:-0.0232} MAB_RIVER_LOADS=${RIVER_LOADS:-true} MAB_RIVER_CHEMISTRY=${RIVER_CHEMISTRY:-rc4uscoast} MAB_RIVER_NO3=${RIVER_NO3:-Hudson:50,Delaware:50,other:20}
 mpirun -np $SLURM_NNODES --map-by ppr:1:node --bind-to none -x LD_LIBRARY_PATH -x PATH -x JULIA_DEPOT_PATH -x JULIA_PKG_GC_AUTO \
     -x MPITRAMPOLINE_LIB -x MPITRAMPOLINE_MPIEXEC \
     -x MAB_START_DATE -x MAB_DAYS -x MAB_PARTITION_X -x MAB_PARTITION_Y -x MAB_NZ -x MAB_CELLS_PER_DEGREE -x MAB_DT -x MAB_PROGRESS_MINUTES \
     -x MAB_SPONGE_VARS -x MAB_SPONGE_WIDTH -x MAB_N_MATCH -x MAB_CHECKPOINT_EVERY -x MAB_MOORINGS -x MAB_MASK_CLEANUP -x MAB_RIVERS \
-    -x MAB_SSS_PISTON -x MAB_SSS_RIVER_MASK -x MAB_TAG -x MAB_BOTTOM -x MAB_ZSTAR -x MAB_TRACER_BOUNDS -x MAB_STAGE -x MAB_PCO2 -x MAB_BGC_DATA -x MAB_BGC_BOUNDS -x MAB_PICKUP -x MAB_BGC_NO3_SOURCE -x MAB_BGC_SCALE_NEGATIVES -x MAB_BGC_LIMITATION -x MAB_RIVER_LOADS -x MAB_RIVER_CHEMISTRY -x MAB_RIVER_NO3 \
+    -x MAB_SSS_PISTON -x MAB_SSS_RIVER_MASK -x MAB_TAG -x MAB_BOTTOM -x MAB_ZSTAR -x MAB_TRACER_BOUNDS -x MAB_STAGE -x MAB_PCO2 -x MAB_BGC_DATA -x MAB_BGC_BOUNDS -x MAB_PICKUP -x MAB_BGC_NO3_SOURCE -x MAB_BGC_SCALE_NEGATIVES -x MAB_BGC_LIMITATION -x MAB_BGC_PAR_FRACTION -x MAB_BGC_WATER_BLUE_ATTENUATION -x MAB_RIVER_LOADS -x MAB_RIVER_CHEMISTRY -x MAB_RIVER_NO3 \
     julia -t $THREADS --project=$JENV bgc/mab_bgc.jl

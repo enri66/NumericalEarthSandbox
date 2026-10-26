@@ -7,13 +7,15 @@
 #   L_temperature = Q₁₀^(T / 10), or 1 when the model has no Q₁₀ (the default of PhytoZoo, and of LOBSTER)
 # `limitation_outputs` returns, as live operations on the model's own fields and parameters, PAR and each term, and the specific
 # growth rate μ / P in 1/day. The formulas are copied from OceanBioME's phyto_zoo.jl (phytoplankton_growth, nitrogen_limitation); they
-# must be re-checked against it when OceanBioME changes. Written by a daily average of hourly samples (see mab_bgc.jl).
+# must be re-checked against it when OceanBioME changes. Also saved: NO₃ and NH₄ (mmol/m³) and `daylight`, the fraction of the samples
+# with PAR above 1 W/m², so that the light term of the daytime is light / daylight (the daily mean of the light term includes the night). Written by a daily average of hourly samples (see mab_bgc.jl).
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Biogeochemistry: biogeochemical_auxiliary_fields
 
 @inline light_term(i, j, k, grid, PAR, kPAR) = @inbounds PAR[i, j, k] / (kPAR + PAR[i, j, k])
 @inline nitrate_term(i, j, k, grid, NO₃, NH₄, kNO₃, ψ) = @inbounds NO₃[i, j, k] * exp(-ψ * NH₄[i, j, k]) / (NO₃[i, j, k] + kNO₃)
 @inline ammonium_term(i, j, k, grid, NH₄, kNH₄) = @inbounds max(0, NH₄[i, j, k] / (kNH₄ + NH₄[i, j, k]))
+@inline daylight_term(i, j, k, grid, PAR) = @inbounds ifelse(PAR[i, j, k] > 1, one(eltype(grid)), zero(eltype(grid)))
 @inline temperature_term(i, j, k, grid, T, ::Nothing) = one(eltype(grid))
 @inline temperature_term(i, j, k, grid, T, Q₁₀) = @inbounds Q₁₀ ^ (T[i, j, k] / 10)
 @inline function growth_term(i, j, k, grid, PAR, NO₃, NH₄, T, μ₀, kPAR, kNO₃, kNH₄, ψ, Q₁₀)
@@ -36,7 +38,8 @@ function limitation_outputs(ocean_model, biogeochemistry)
     haskey(auxiliary, :PAR) || error("the biogeochemistry has no PAR auxiliary field")
     grid, tr, PAR = ocean_model.grid, ocean_model.tracers, auxiliary.PAR
     op(f, args...) = KernelFunctionOperation{Center, Center, Center}(f, grid, args...)
-    return (; PAR,
+    return (; PAR, NO₃ = tr.NO₃, NH₄ = tr.NH₄,
+              daylight    = op(daylight_term, PAR),
               light       = op(light_term, PAR, kPAR),
               nitrate     = op(nitrate_term, tr.NO₃, tr.NH₄, kNO₃, ψ),
               ammonium    = op(ammonium_term, tr.NH₄, kNH₄),

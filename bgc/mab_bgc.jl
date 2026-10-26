@@ -931,8 +931,16 @@ sediment_kw = BGC_SEDIMENT ? (; sediment = InstantRemineralisationSediment(grid;
 # of a conserved group (nitrogen; carbon with DIC) to zero and scales the positive ones to keep the group's total, and
 # sets the cell to zero where the total itself is negative (invalid_fill_value = 0, which does not conserve there).
 const BGC_SCALE_NEGATIVES = get(ENV, "MAB_BGC_SCALE_NEGATIVES", "false") == "true"
-biogeochemistry = LOBSTER(grid; surface_PAR = PARFromShortwave(grid), oxygen = Oxygen(), inorganic_carbon = CarbonateSystem(),
+# Light sensitivity (the defaults are OceanBioME's): MAB_BGC_PAR_FRACTION, the fraction of the ERA5 shortwave that is PAR (0.43),
+# and MAB_BGC_WATER_BLUE_ATTENUATION, the attenuation of the blue band of the two-band light by water alone (0.0232 1/m, clear
+# ocean water; turbid shelf water has 0.05-0.15 1/m once particles and dissolved matter are counted)
+const PAR_FRACTION = parse(Float64, get(ENV, "MAB_BGC_PAR_FRACTION", "0.43"))
+const WATER_BLUE_ATTENUATION = parse(Float64, get(ENV, "MAB_BGC_WATER_BLUE_ATTENUATION", "0.0232"))
+surface_PAR = PARFromShortwave(grid; photosynthetic_fraction_of_shortwave = PAR_FRACTION)
+light_attenuation = OceanBioME.Light.TwoBandPhotosyntheticallyActiveRadiation(grid, surface_PAR; water_blue_attenuation = WATER_BLUE_ATTENUATION)
+biogeochemistry = LOBSTER(grid; surface_PAR, light_attenuation, oxygen = Oxygen(), inorganic_carbon = CarbonateSystem(),
                           scale_negatives = BGC_SCALE_NEGATIVES, invalid_fill_value = 0.0, sediment_kw...)
+(PAR_FRACTION, WATER_BLUE_ATTENUATION) == (0.43, 0.0232) || say("light: PAR fraction of the shortwave $PAR_FRACTION, blue-band attenuation by water $WATER_BLUE_ATTENUATION 1/m")
 const LIMITATION = get(ENV, "MAB_BGC_LIMITATION", "false") == "true"
 const LIMITATION_LEVELS = parse(Int, get(ENV, "MAB_BGC_LIMITATION_LEVELS", "12"))
 BGC_SCALE_NEGATIVES && say("negative BGC tracers scaled (ScaleNegativeTracers, conserved groups, invalid cells set to zero)")

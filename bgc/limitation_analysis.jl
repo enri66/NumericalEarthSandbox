@@ -64,8 +64,11 @@ say("model: $(Nx)×$(Ny)×$(Nz) on $NR ranks, $(count(wet)) wet columns; shelf $
 
 # ---------------- the limitation output ----------------
 iters(f, name) = sort(parse.(Int, filter(k -> k != "serialized", keys(f["timeseries/$name"]))))
-const FIELDS = (:PAR, :light, :nitrate, :ammonium, :temperature, :growth)
 limitation_files = ["$(TAG)_bgc_limitation_rank$(r).jld2" for r in 0:NR-1]
+# runs from before 2026-10-26 lack the concentrations and the daylight fraction
+const FIELDS = Tuple(name for name in (:PAR, :light, :nitrate, :ammonium, :temperature, :growth, :NO₃, :NH₄, :daylight)
+                     if jldopen(f -> haskey(f["timeseries"], String(name)), limitation_files[1]))
+const HAS_DAYLIGHT = :daylight in FIELDS
 lim_times = jldopen(f -> [f["timeseries/t/$it"] for it in iters(f, "PAR")], limitation_files[1])
 Nd = length(lim_times)
 const L = jldopen(f -> size(f["timeseries/PAR/$(iters(f, "PAR")[1])"], 3), limitation_files[1])
@@ -135,6 +138,9 @@ say("mixed-layer depth computed on $(count(n -> any(!isnan, mld[:, :, n]), 1:Nd)
 # ---------------- derived quantities ----------------
 L_N = (lim[:nitrate] .+ lim[:ammonium]) ./ 2                      # the nutrient term
 surface(name) = lim[name][:, :, L, :]
+# the light term of the daytime: the daily mean of the term includes the night (the fraction of the samples with PAR > 1 W/m² is saved)
+daytime_light = HAS_DAYLIGHT ? ifelse.(lim[:daylight] .> 0.02f0, lim[:light] ./ max.(lim[:daylight], 0.02f0), NaN32) : lim[:light]
+HAS_DAYLIGHT || say("no daylight fraction in this run: the light term below is the daily mean, which includes the night")
 PAR0 = surface(:PAR)
 # euphotic depth (1% of the surface PAR) from the saved levels; NaN where PAR stays above 1% to the lowest saved level
 zeu = fill(NaN, Nx, Ny, Nd)
@@ -180,7 +186,8 @@ region_series(A, mask) = [(v = A[:, :, n][mask .& isfinite.(A[:, :, n])]; isempt
 series_sets = (CNSM = A -> point_series(A, cells["CNSM"]), ISSM = A -> point_series(A, cells["ISSM"]),
                shelf = A -> region_series(A, regions.shelf), slope = A -> region_series(A, regions.slope), deep = A -> region_series(A, regions.deep))
 ML_light = mixed_layer_mean(lim[:light]); ML_growth = mixed_layer_mean(lim[:growth]); ML_N = mixed_layer_mean(L_N)
-quantities = (; PAR = PAR0, light = surface(:light), nitrate = surface(:nitrate), ammonium = surface(:ammonium), nutrient = L_N[:, :, L, :],
+quantities = (; PAR = PAR0, light = surface(:light), daytime = daytime_light[:, :, L, :],
+                NO₃ = HAS_DAYLIGHT ? surface(:NO₃) : fill(NaN32, Nx, Ny, Nd), NH₄ = HAS_DAYLIGHT ? surface(:NH₄) : fill(NaN32, Nx, Ny, Nd), nitrate = surface(:nitrate), ammonium = surface(:ammonium), nutrient = L_N[:, :, L, :],
                 growth = surface(:growth), MLD = mld, zeu = zeu, ML_light, ML_nutrient = ML_N, ML_growth)
 
 say("\nmeans over the $Nd days at the surface level (top cell, ~$(round(depth_c[L], digits = 1)) m): PAR W/m², terms 0-1, growth 1/day; mixed-layer depth and euphotic depth in m")
@@ -193,9 +200,20 @@ for (key, f) in pairs(series_sets)
     say(@sprintf("%-6s %7.1f %7.3f %7.3f %7.3f %7.3f %7.3f %7.1f %7.1f %7.3f %7.3f %7.3f", String(key), m[:PAR], m[:light], m[:nitrate], m[:ammonium], m[:nutrient], m[:growth], m[:MLD], m[:zeu], m[:ML_light], m[:ML_nutrient], m[:ML_growth]))
 end
 
-say("\nwhich factor limits growth at the surface: share of cell-days with L_light < L_N (light-limited) and L_N < L_light (nutrient-limited), and of the nutrient term from nitrate (L_NO₃/2 over L_N)")
+months = unique(Dates.yearmonth.(dates))
+say("\nmonthly means of the surface level (daytime light term is the mean of the term over the hours with PAR > 1 W/m²; NO₃, NH₄ in mmol/m³)")
+say(@sprintf("%-8s %-8s %5s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s", "month", "", "days", "PAR", "L_light", "L_day", "L_N", "μ/P", "MLD", "z_eu", "NO₃", "NH₄", "LD<LN %"))
+for (y, m) in months, (key, f) in pairs(series_sets)
+    sel = findall(d -> Dates.yearmonth(d) == (y, m), dates)
+    mean_over(q) = (v = filter(isfinite, f(quantities[q])[sel]); isempty(v) ? NaN : mean(v))
+    a = f(quantities.daytime)[sel]; b = f(quantities.nutrient)[sel]; ok = isfinite.(a) .& isfinite.(b)
+    say(@sprintf("%04d-%02d  %-8s %5d %7.1f %7.3f %7.3f %7.3f %7.3f %7.1f %7.1f %7.3f %7.4f %7.0f", y, m, String(key), length(sel), mean_over(:PAR), mean_over(:light), mean_over(:daytime),
+                 mean_over(:nutrient), mean_over(:growth), mean_over(:MLD), mean_over(:zeu), mean_over(:NO₃), mean_over(:NH₄), any(ok) ? 100 * mean(a[ok] .< b[ok]) : NaN))
+end
+
+say("\nwhich factor limits growth at the surface: share of cell-days with the daytime L_light < L_N (light-limited) and L_N < L_light (nutrient-limited), and of the nutrient term from nitrate (L_NO₃/2 over L_N)")
 for (key, mask) in (("shelf", regions.shelf), ("slope", regions.slope), ("deep", regions.deep))
-    a = region_values(quantities.light, mask); b = region_values(quantities.nutrient, mask); c = region_values(quantities.nitrate, mask)
+    a = region_values(quantities.daytime, mask); b = region_values(quantities.nutrient, mask); c = region_values(quantities.nitrate, mask)
     ok = isfinite.(a) .& isfinite.(b) .& (b .> 0)
     say(@sprintf("  %-6s light-limited %5.1f %%   nutrient-limited %5.1f %%   nitrate share of L_N %5.1f %%   L_N < 0.1: %5.1f %%   L_light < 0.1: %5.1f %%",
                  key, 100 * mean(a[ok] .< b[ok]), 100 * mean(b[ok] .< a[ok]), 100 * mean(c[ok] ./ 2 ./ b[ok]), 100 * mean(b[ok] .< 0.1), 100 * mean(a[ok] .< 0.1)))
