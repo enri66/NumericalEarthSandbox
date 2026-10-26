@@ -366,6 +366,20 @@ WorldOceanAtlasTools 0.6.5 and CopernicusMarine 0.2.0 unchanged. Old files: `Pro
 
 *Corrections (2026-10-26) to what was first written here.* (1) The light term in these files is the daily mean of hourly values and therefore contains the night: 0.35 is a daytime value of roughly 0.7, so "light is the smaller term in 94 % of shelf cell-days" compared a diurnal mean with a nutrient term and overstated light limitation; in March light and nutrients are about equally limiting in the daytime. The runs from 2026-10-26 on also save `daylight` (fraction of samples with PAR > 1 W/m²) and `limitation_analysis.jl` reports the daytime term. (2) LOBSTER's half-saturation constants are k_NO₃ = 0.7 and **k_NH₄ = 0.001 mmol N/m³** (the `LOBSTER` constructor, not PhytoZoo's defaults), so L_NH₄ = NH₄/(0.001 + NH₄) is 0.5-0.8 for NH₄ of only 0.001-0.004 mmol/m³: trace ammonium saturates its term, and since L_N = (L_NO₃ + L_NH₄)/2 the nutrient term cannot fall below about L_NH₄/2 as long as any NH₄ is present. That is a model property, not "NH₄ of the order of its half-saturation" as first written, and it is a candidate for the too-high deep-ocean chlorophyll (nitrate-poor water still grows at about half rate). The runs from 2026-10-26 save NO₃ and NH₄ in the limitation file to check this.
 
+## Light sensitivity (2026-10-26)
+
+Restarts from the day-35 checkpoint of `bgc_feb19_woa` to day 50 (old stack, same flags as `bgc_feb19_woa_lim`), changing only the light: `bgc_feb19_woa_lim_par15` (`MAB_BGC_PAR_FRACTION=0.645`, PAR × 1.5) and `bgc_feb19_woa_lim_att10` (`MAB_BGC_WATER_BLUE_ATTENUATION=0.10` 1/m instead of 0.0232, a turbid-shelf value). Compared over the 9 common de-tided frames (2019-03-12 → 03-20) with `bgc/light_sensitivity.jl` and `bgc/validate_bgc.jl`:
+
+| surface chlorophyll, mg/m³ | CNSM | ISSM | shelf | slope | deep |
+|---|---|---|---|---|---|
+| reference | 1.13 | 1.12 | 1.04 | 0.93 | 0.56 |
+| PAR × 1.5 | 1.23 (+9 %) | 1.21 (+9 %) | 1.09 (+5 %) | 1.00 (+8 %) | 0.60 (+6 %) |
+| turbid | 1.01 (-11 %) | 1.00 (-11 %) | 0.97 (-7 %) | 0.83 (-10 %) | 0.49 (-13 %) |
+
+Satellite (shelf mean 2.45 mg/m³ in these days): the model shelf mean is 1.04 / 1.10 / 0.96 (reference / PAR × 1.5 / turbid), the log10 bias -0.19 / -0.17 / -0.23, the daily correlation +0.09 / +0.03 / +0.21; deep ocean 0.59 / 0.63 / 0.52 against 0.40. Nine frames only. **A 50 % change in PAR moves the shelf chlorophyll by 5 %: the March shelf deficit (a factor 2.3) is not a light-supply problem.** The reason is in the limitation output of the PAR × 1.5 run: the daytime light term is already 0.71 (the sigmoid PAR/(33 + PAR) is saturated for most of the day), the nutrient term 0.62-0.68, and the daytime light term is the smaller one in only 7 % (shelf) to 33 % (deep) of the cell-days there. Surface NH₄ is 0.004-0.025 mmol/m³ (shelf 0.014), i.e. 4-25 × k_NH₄: trace ammonium keeps L_NH₄ near 1. The growth rate is capped at μ₀ = 0.6/day and is about 0.4/day (L_N ≈ 0.65 × light); to reach 2.4 mg Chl/m³ on the shelf the loss terms (grazing, mortality, sinking, the sponge/boundary P from Copernicus) or the growth-rate cap are the next things to test, not the light. The turbid run has a 7-13 % higher surface growth rate with 7-12 % less phytoplankton: less P takes up less nitrate, so L_N rises.
+
+April-May: job 12224 (`bgc_feb19_woa_lim2`, from the day-50 checkpoint to 2019-06-01) failed at start-up: WOA's June monthly nitrate (`woa23_all_n06_01.nc`, needed to interpolate from mid-May to mid-June) is not in `julia_depot/scratchspaces/.../datadeps/` (only Jan-May, Aug, Sep are) and triton's compute nodes cannot download it.
+
 ## Practical notes
 
 - Sandbox: `~/Dropbox/Models/NumericalEarthSandbox` (Mac) and `/t0/workdir/enrique/Models/NumericalEarthSandbox`
