@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH -J mabyear
 #SBATCH --exclusive
+#SBATCH --no-requeue
 #SBATCH -o /t0/workdir/enrique/year_run/out/logs/seg_%j.log
 # One segment of the year-long run: a fresh start or a pickup (see prepare_segment.sh), to the end of the year or until a failure.
 . /t0/workdir/enrique/year_run/config.env

@@ -1,9 +1,12 @@
 # Shared helpers (sourced). Needs config.env sourced first.
 
-# Iterations that have a checkpoint file for every rank, ascending.
+# Iterations that have a checkpoint file for every rank, none of them cut short, ascending. A file is cut short when it is
+# smaller than 90% of the largest checkpoint file of the same rank (a power loss during the write left 50% on 2026-10-26).
 complete_iterations() {
-    ( cd $OUT && ls mabyear_s*_checkpoint_rank*_iteration*.jld2 2>/dev/null ) | sed -E 's/.*_rank([0-9]+)_iteration([0-9]+)\.jld2/\1 \2/' | sort -u |
-    awk -v n=$NRANKS '{c[$2]++} END {for (i in c) if (c[i] == n) print i}' | sort -n
+    ( cd $OUT && for f in mabyear_s*_checkpoint_rank*_iteration*.jld2; do [ -e "$f" ] && stat -L -c '%s %n' "$f"; done ) 2>/dev/null |
+    sed -E 's/^([0-9]+) .*_rank([0-9]+)_iteration([0-9]+)\.jld2$/\2 \3 \1/' | sort -u |
+    awk -v n=$NRANKS '{ rank=$1; it=$2; size=$3; sz[rank" "it]=size; if (size > mx[rank]) mx[rank]=size; its[it]=1 }
+        END { for (it in its) { ok=0; for (r in mx) { k=r" "it; if (k in sz && sz[k] >= 0.9*mx[r]) ok++ } if (ok == n) print it } }' | sort -n
 }
 
 # Simulated iteration of the last progress line in a log (empty if none).
