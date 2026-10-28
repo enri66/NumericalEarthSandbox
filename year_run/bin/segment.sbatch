@@ -17,9 +17,11 @@ for v in $(compgen -e | grep '^MAB_'); do MPIX="$MPIX -x $v"; done
 # one rank per triton16 node, three per triton48 node (node53-56), the triton48 nodes last
 HF=$OUT/hostfile_$SLURM_JOB_ID
 rm -f $HF
-for n in $(scontrol show hostnames $SLURM_JOB_NODELIST); do
-    case $n in node5[3-6]) ;; *) echo "$n slots=1" >> $HF ;; esac
-done
+# node6 came back from the 2026-10-26 power loss with less memory (49 GB): give it an interior rank (rank 8 of the 7 x 4 layout),
+# which holds no sponge columns, instead of an edge or corner rank
+T16=(); for n in $(scontrol show hostnames $SLURM_JOB_NODELIST); do case $n in node5[3-6]) ;; node6) ;; *) T16+=($n) ;; esac; done
+if scontrol show hostnames $SLURM_JOB_NODELIST | grep -qx node6; then T16=("${T16[@]:0:8}" node6 "${T16[@]:8}"); fi
+for n in "${T16[@]}"; do echo "$n slots=1" >> $HF; done
 for n in $(scontrol show hostnames $SLURM_JOB_NODELIST); do
     case $n in node5[3-6]) echo "$n slots=3" >> $HF ;; esac
 done
