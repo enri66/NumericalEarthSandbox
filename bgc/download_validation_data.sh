@@ -1,6 +1,6 @@
 #!/bin/bash
-# The observations bgc/validate_bgc.jl compares a BGC run with, for 2019-01-25 → 2019-04-02 (change T below for another
-# period). Run where there is internet (the Mac, or antares), then copy the files to triton:
+# The observations bgc/validate_bgc.jl compares a BGC run with, for 2019-01-25 → 2019-04-02 (T0=2019-04-01 T1=2019-06-02 for
+# another period; the satellite command at the end has its dates to change too). Run where there is internet (the Mac, or antares), then copy the files to triton:
 #   OOI Pioneer BGC sensors  → /t0/workdir/enrique/Data/OOI/pioneer_bgc_2019/   (CSV from OOI's ERDDAP)
 #   Copernicus ocean colour  → /t0/workdir/enrique/Data/ocean_colour/            (L3 daily multi-sensor chlorophyll, 4 km)
 # Notes from using them in 2019:
@@ -9,7 +9,8 @@
 #   - the near-surface oxygen optodes (dosta_nsif) read 123-131 % saturation at CNSM and ISSM in Feb-Mar 2019, with QC flag 1.
 set -e
 B="https://erddap.dataexplorer.oceanobservatories.org/erddap/tabledap"
-T='&time>=2019-01-25T00:00:00Z&time<=2019-04-02T00:00:00Z'
+T0=${T0:-2019-01-25}; T1=${T1:-2019-04-02}      # the period (environment T0, T1)
+T="&time>=${T0}T00:00:00Z&time<=${T1}T00:00:00Z"
 OUT=${1:-ooi_bgc_2019}; mkdir -p "$OUT"; cd "$OUT"
 get() { curl -s -m 300 -o "$1.csv" "$B/$2.csv?$3$T"; }
 for m in cp01cnsm cp03issm; do      # central and inshore surface moorings (the offshore one is off station)
