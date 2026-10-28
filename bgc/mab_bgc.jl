@@ -922,11 +922,21 @@ end
 
 # ---------------- BGC: the biogeochemistry ----------------
 # LOBSTER with oxygen and the carbonate system; two-band light (chlorophyll-dependent attenuation) under the surface PAR
-# from the ERA5 shortwave. MAB_BGC_SEDIMENT (default true): the sinking particulate detritus that reaches the seafloor is
-# remineralised there into NH₄ (less a burial fraction), instead of piling up in the bottom cells.
-const BGC_SEDIMENT = get(ENV, "MAB_BGC_SEDIMENT", "true") == "true"
-sediment_kw = BGC_SEDIMENT ? (; sediment = InstantRemineralisationSediment(grid; sinking_tracers = (:sPOM, :bPOM),
-                                                                             remineralisation_reciever = :NH₄)) : (;)
+# from the ERA5 shortwave. MAB_BGC_SEDIMENT: "true" or "instant" (default), the sinking particulate detritus that reaches the
+# seafloor is remineralised there at once into NH₄ (less a burial fraction), instead of piling up in the bottom cells;
+# "multig", OceanBioME's single-layer multi-G sediment (Soetaert et al. 2000, level 3): the sinking nitrogen goes into a fast
+# (2/day), a slow (0.2/day) and a refractory pool (prognostic 2D fields Ns, Nf, Nr, mmol N/m², not in the checkpoints: they restart
+# at zero and the fast and slow pools spin up in about 5 days), whose decay returns NH₄ and NO₃ (nitrification, denitrification)
+# and takes O₂ (6.56 mol O₂ per mol N) from the bottom cell; "false", no sediment (the sinking detritus is lost).
+# MAB_BGC_SEDIMENTATION_RATE (cm/year, multig): OceanBioME takes 982 D^-1.548 at the depth D of the first grid cell, one number
+# for the whole domain and wrong for the shelf; default 1.4, the value for D = 70 m, which only enters the O₂ term.
+const SEDIMENT_MODE = Symbol(lowercase(get(ENV, "MAB_BGC_SEDIMENT", "true")) in ("true", "instant") ? "instant" : lowercase(get(ENV, "MAB_BGC_SEDIMENT", "true")))
+SEDIMENT_MODE in (:instant, :multig, :false) || error("MAB_BGC_SEDIMENT: true, instant, multig or false, not $SEDIMENT_MODE")
+const BGC_SEDIMENT = SEDIMENT_MODE != :false
+const SEDIMENTATION_RATE = parse(Float64, get(ENV, "MAB_BGC_SEDIMENTATION_RATE", "1.4"))
+sediment_kw = SEDIMENT_MODE == :instant ? (; sediment = InstantRemineralisationSediment(grid; sinking_tracers = (:sPOM, :bPOM),
+                                                                                       remineralisation_reciever = :NH₄)) :
+              SEDIMENT_MODE == :multig  ? (; sediment = SimpleMultiGSediment(grid; sinking_nitrogen = (:sPOM, :bPOM), sedimentation_rate = SEDIMENTATION_RATE)) : (;)
 # MAB_BGC_SCALE_NEGATIVES (default false): OceanBioME's ScaleNegativeTracers, which in every cell sets the negative tracers
 # of a conserved group (nitrogen; carbon with DIC) to zero and scales the positive ones to keep the group's total, and
 # sets the cell to zero where the total itself is negative (invalid_fill_value = 0, which does not conserve there).
@@ -945,7 +955,7 @@ const LIMITATION = get(ENV, "MAB_BGC_LIMITATION", "false") == "true"
 const LIMITATION_LEVELS = parse(Int, get(ENV, "MAB_BGC_LIMITATION_LEVELS", "12"))
 BGC_SCALE_NEGATIVES && say("negative BGC tracers scaled (ScaleNegativeTracers, conserved groups, invalid cells set to zero)")
 const BGC_TRACERS = required_biogeochemical_tracers(biogeochemistry)
-say("biogeochemistry: LOBSTER + O₂ + carbonate system, tracers $(join(BGC_TRACERS, ", ")), seafloor remineralisation $(BGC_SEDIMENT ? "on" : "off")")
+say("biogeochemistry: LOBSTER + O₂ + carbonate system, tracers $(join(BGC_TRACERS, ", ")), seafloor sediment: $SEDIMENT_MODE")
 
 # Every BGC tracer is advected with the bounds-preserving WENO-7, within [0, 1e5] unless MAB_BGC_BOUNDS gives its interval
 # (e.g. "NO₃:0:30,O₂:50:450"); T and S keep the scheme set above
@@ -1522,6 +1532,19 @@ simulation.output_writers[:bgc_surface_daily] = JLD2Writer(oc, bgc_surface;
 simulation.output_writers[:bgc_volume_daily] = JLD2Writer(oc, bgc_volume;
     filename = joinpath(@__DIR__, "..", TAG * "_bgc_volume_daily.jld2"),
     schedule = FilteredTimeInterval(LanczosKernel(6days; cutoff = 40hours); interval = 1days), overwrite_files = fresh_start)
+# the sediment's prognostic fields (multi-G: the pools Ns, Nf, Nr, mmol N/m²) and the fields it tracks, `tracked_*` (the sinking
+# fluxes sPOM, bPOM in mmol N/m²/s it receives and, for multi-G, the bottom-cell NO₃, NH₄ and O₂ it reacts with):
+# daily means of hourly samples, 2D
+if BGC_SEDIMENT
+    sediment_model = let b = biogeochemistry
+        while !hasproperty(b, :sediment) && hasproperty(b, :underlying_biogeochemistry); b = b.underlying_biogeochemistry; end
+        b.sediment
+    end
+    sediment_fields = merge(NamedTuple(sediment_model.fields), NamedTuple{Tuple(Symbol("tracked_", n) for n in keys(sediment_model.tracked_fields))}(values(sediment_model.tracked_fields)))
+    simulation.output_writers[:bgc_sediment] = JLD2Writer(oc, sediment_fields;
+        filename = joinpath(@__DIR__, "..", TAG * "_bgc_sediment.jld2"),
+        schedule = AveragedTimeInterval(1days; stride = round(Int, 3600 / Δt_baroclinic)), overwrite_files = fresh_start)
+end
 LIMITATION && include(joinpath(@__DIR__, "bgc_limitation.jl"))
 # MAB_BGC_LIMITATION=true: daily means of hourly samples of PAR, the light, nitrate and ammonium limitation terms, the
 # temperature factor and the specific growth rate (1/day) of LOBSTER's phytoplankton in the top LIMITATION_LEVELS levels
