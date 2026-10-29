@@ -937,6 +937,15 @@ const SEDIMENTATION_RATE = parse(Float64, get(ENV, "MAB_BGC_SEDIMENTATION_RATE",
 sediment_kw = SEDIMENT_MODE == :instant ? (; sediment = InstantRemineralisationSediment(grid; sinking_tracers = (:sPOM, :bPOM),
                                                                                        remineralisation_reciever = :NH₄)) :
               SEDIMENT_MODE == :multig  ? (; sediment = SimpleMultiGSediment(grid; sinking_nitrogen = (:sPOM, :bPOM), sedimentation_rate = SEDIMENTATION_RATE)) : (;)
+# MAB_BGC_SEDIMENT_STEPPING (multig): "stages" (default, OceanBioME as it is) steps the sediment at every stage of the split
+# Runge-Kutta with the stage's Δt added to the previous stage's state, so 11/6 Δt per step instead of Δt; "once" (bgc/sediment_stepping.jl)
+# sets the sediment at stage m to its value at the start of the step plus Δt/βᵐ times its tendency, as the water column is.
+const SEDIMENT_STEPPING = get(ENV, "MAB_BGC_SEDIMENT_STEPPING", "stages")
+SEDIMENT_STEPPING in ("stages", "once") || error("MAB_BGC_SEDIMENT_STEPPING: stages or once, not $SEDIMENT_STEPPING")
+if SEDIMENT_MODE == :multig && SEDIMENT_STEPPING == "once"
+    include(joinpath(@__DIR__, "sediment_stepping.jl"))
+    say("sediment stepping: once per step (start of the step + Δt/β × tendency at each stage)")
+end
 # MAB_BGC_SCALE_NEGATIVES (default false): OceanBioME's ScaleNegativeTracers, which in every cell sets the negative tracers
 # of a conserved group (nitrogen; carbon with DIC) to zero and scales the positive ones to keep the group's total, and
 # sets the cell to zero where the total itself is negative (invalid_fill_value = 0, which does not conserve there).
