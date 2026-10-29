@@ -954,8 +954,21 @@ light_attenuation = OceanBioME.Light.TwoBandPhotosyntheticallyActiveRadiation(gr
 const K_NH4 = parse(Float64, get(ENV, "MAB_BGC_K_NH4", "0.001"))
 plankton_kw = K_NH4 == 0.001 ? (;) : (; plankton = PhytoZoo(Float64; nutrient_half_saturations = (nitrate = 0.7, ammonia = K_NH4)))
 K_NH4 == 0.001 || say("ammonium half-saturation of the phytoplankton: $K_NH4 mmol N/m³ (LOBSTER: 0.001)")
+# MAB_BGC_NBUDGET (default false): bgc/nbudget.jl sums the nitrogen of the shelf columns (< MAB_BGC_NBUDGET_DEPTH m) every hour and
+# integrates the lateral flux, the sponge source and the N added by ScaleNegativeTracers, into <TAG>_nbudget_rank<r>.txt
+const NBUDGET = get(ENV, "MAB_BGC_NBUDGET", "false") == "true"
+NBUDGET && include(joinpath(@__DIR__, "nbudget.jl"))
+scale_kw = (; scale_negatives = BGC_SCALE_NEGATIVES, invalid_fill_value = 0.0)
+if NBUDGET && BGC_SCALE_NEGATIVES
+    nbudget = NBudget(size(grid, 1), size(grid, 2))
+    plain = LOBSTER(grid; surface_PAR, light_attenuation, plankton_kw..., oxygen = Oxygen(), inorganic_carbon = CarbonateSystem())
+    scaler = OceanBioME.ScaleNegativeTracers(plain.underlying_biogeochemistry; invalid_fill_value = 0.0)
+    scale_kw = (; scale_negatives = false, modifiers = (NProbe(nbudget, :before), scaler, NProbe(nbudget, :after)))
+elseif NBUDGET
+    nbudget = NBudget(size(grid, 1), size(grid, 2))
+end
 biogeochemistry = LOBSTER(grid; surface_PAR, light_attenuation, plankton_kw..., oxygen = Oxygen(), inorganic_carbon = CarbonateSystem(),
-                          scale_negatives = BGC_SCALE_NEGATIVES, invalid_fill_value = 0.0, sediment_kw...)
+                          scale_kw..., sediment_kw...)
 (PAR_FRACTION, WATER_BLUE_ATTENUATION) == (0.43, 0.0232) || say("light: PAR fraction of the shortwave $PAR_FRACTION, blue-band attenuation by water $WATER_BLUE_ATTENUATION 1/m")
 const LIMITATION = get(ENV, "MAB_BGC_LIMITATION", "false") == "true"
 const LIMITATION_LEVELS = parse(Int, get(ENV, "MAB_BGC_LIMITATION_LEVELS", "12"))
@@ -1205,6 +1218,15 @@ catch e
 end
 simulation = Simulation(model; Δt = Δt_baroclinic, stop_time = sim_days * days, stop_iteration = STOP_ITERATION)
 
+# BGC: the nitrogen budget of the shelf (bgc/nbudget.jl): the lateral flux at every step, the rest hourly
+if NBUDGET
+    nbudget_file = "$(TAG)_nbudget_rank$(rank).txt"
+    nbudget_interval = round(Int, 3600 / Δt_baroclinic)
+    isfile(nbudget_file) || open(io -> println(io, "# time_s W_mmolN lateral_mmolN sponge_mmolN scaleneg_mmolN"), nbudget_file, "w")
+    add_callback!(simulation, sim -> nb_step!(sim, nbudget), IterationInterval(1))
+    add_callback!(simulation, sim -> nb_write!(sim, nbudget, nbudget_file, nbudget_interval * Δt_baroclinic), IterationInterval(nbudget_interval))
+    say("nitrogen budget of the columns shallower than $NB_DEPTH m: $nbudget_file")
+end
 # BGC: the river loads follow the runoff flux of the land component (update_river_loads! is defined above)
 if RIVER_LOADS
     runoff_flux = model.interfaces.exchanger.land.state.runoff_freshwater_flux
