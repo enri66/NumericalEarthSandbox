@@ -948,7 +948,13 @@ const PAR_FRACTION = parse(Float64, get(ENV, "MAB_BGC_PAR_FRACTION", "0.43"))
 const WATER_BLUE_ATTENUATION = parse(Float64, get(ENV, "MAB_BGC_WATER_BLUE_ATTENUATION", "0.0232"))
 surface_PAR = PARFromShortwave(grid; photosynthetic_fraction_of_shortwave = PAR_FRACTION)
 light_attenuation = OceanBioME.Light.TwoBandPhotosyntheticallyActiveRadiation(grid, surface_PAR; water_blue_attenuation = WATER_BLUE_ATTENUATION)
-biogeochemistry = LOBSTER(grid; surface_PAR, light_attenuation, oxygen = Oxygen(), inorganic_carbon = CarbonateSystem(),
+# MAB_BGC_K_NH4 (mmol N/m³, default 0.001, LOBSTER's own): the half-saturation of the phytoplankton's ammonium uptake. The nutrient term is
+# the mean of a nitrate term and an ammonium term NH₄/(K + NH₄), so with K = 0.001 a trace of NH₄ (0.01 mmol/m³) already gives the
+# ammonium term 0.9; the other PhytoZoo parameters are LOBSTER's defaults (maximum growth rate 2.42e-5 1/s = 2.09 per day).
+const K_NH4 = parse(Float64, get(ENV, "MAB_BGC_K_NH4", "0.001"))
+plankton_kw = K_NH4 == 0.001 ? (;) : (; plankton = PhytoZoo(Float64; nutrient_half_saturations = (nitrate = 0.7, ammonia = K_NH4)))
+K_NH4 == 0.001 || say("ammonium half-saturation of the phytoplankton: $K_NH4 mmol N/m³ (LOBSTER: 0.001)")
+biogeochemistry = LOBSTER(grid; surface_PAR, light_attenuation, plankton_kw..., oxygen = Oxygen(), inorganic_carbon = CarbonateSystem(),
                           scale_negatives = BGC_SCALE_NEGATIVES, invalid_fill_value = 0.0, sediment_kw...)
 (PAR_FRACTION, WATER_BLUE_ATTENUATION) == (0.43, 0.0232) || say("light: PAR fraction of the shortwave $PAR_FRACTION, blue-band attenuation by water $WATER_BLUE_ATTENUATION 1/m")
 const LIMITATION = get(ENV, "MAB_BGC_LIMITATION", "false") == "true"
