@@ -967,12 +967,19 @@ K_NH4 == 0.001 || say("ammonium half-saturation of the phytoplankton: $K_NH4 mmo
 # integrates the lateral flux, the sponge source and the N added by ScaleNegativeTracers, into <TAG>_nbudget_rank<r>.txt
 const NBUDGET = get(ENV, "MAB_BGC_NBUDGET", "false") == "true"
 NBUDGET && include(joinpath(@__DIR__, "nbudget.jl"))
-scale_kw = (; scale_negatives = BGC_SCALE_NEGATIVES, invalid_fill_value = 0.0)
+# MAB_BGC_SEDIMENT_THICKNESS (default false): OceanBioME adds the sediment's flux to the bottom wet cell as flux / Δzᶜᶜᶠ, the centre
+# spacing of the full cells, not the thickness of the (partial) bottom cell, so about half the nitrogen the sediment returns never
+# reaches the water; true (bgc/sediment_thickness.jl) divides by the cell's thickness Δzᶜᶜᶜ instead
+const SEDIMENT_THICKNESS = get(ENV, "MAB_BGC_SEDIMENT_THICKNESS", "false") == "true"
+SEDIMENT_THICKNESS && BGC_SEDIMENT && include(joinpath(@__DIR__, "sediment_thickness.jl"))
+SEDIMENT_THICKNESS && BGC_SEDIMENT && say("sediment-water coupling: flux divided by the thickness of the bottom cell (Δzᶜᶜᶜ), not Δzᶜᶜᶠ")
+thickness_mods = SEDIMENT_THICKNESS && BGC_SEDIMENT ? (SedimentThickness(),) : ()
+scale_kw = (; scale_negatives = BGC_SCALE_NEGATIVES, invalid_fill_value = 0.0, modifiers = isempty(thickness_mods) ? nothing : thickness_mods)
 if NBUDGET && BGC_SCALE_NEGATIVES
     nbudget = NBudget(size(grid, 1), size(grid, 2))
     plain = LOBSTER(grid; surface_PAR, light_attenuation, plankton_kw..., oxygen = Oxygen(), inorganic_carbon = CarbonateSystem())
     scaler = OceanBioME.ScaleNegativeTracers(plain.underlying_biogeochemistry; invalid_fill_value = 0.0)
-    scale_kw = (; scale_negatives = false, modifiers = (NProbe(nbudget, :before), scaler, NProbe(nbudget, :after)))
+    scale_kw = (; scale_negatives = false, modifiers = (thickness_mods..., NProbe(nbudget, :before), scaler, NProbe(nbudget, :after)))
 elseif NBUDGET
     nbudget = NBudget(size(grid, 1), size(grid, 2))
 end
