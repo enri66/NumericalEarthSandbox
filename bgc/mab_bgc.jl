@@ -937,10 +937,10 @@ const SEDIMENTATION_RATE = parse(Float64, get(ENV, "MAB_BGC_SEDIMENTATION_RATE",
 sediment_kw = SEDIMENT_MODE == :instant ? (; sediment = InstantRemineralisationSediment(grid; sinking_tracers = (:sPOM, :bPOM),
                                                                                        remineralisation_reciever = :NH₄)) :
               SEDIMENT_MODE == :multig  ? (; sediment = SimpleMultiGSediment(grid; sinking_nitrogen = (:sPOM, :bPOM), sedimentation_rate = SEDIMENTATION_RATE)) : (;)
-# MAB_BGC_SEDIMENT_STEPPING (multig): "stages" (default, OceanBioME as it is) steps the sediment at every stage of the split
-# Runge-Kutta with the stage's Δt added to the previous stage's state, so 11/6 Δt per step instead of Δt; "once" (bgc/sediment_stepping.jl)
+# MAB_BGC_SEDIMENT_STEPPING (multig): "stages" (OceanBioME as it is) steps the sediment at every stage of the split
+# Runge-Kutta with the stage's Δt added to the previous stage's state, so 11/6 Δt per step instead of Δt; "once" (default since 2026-10-29, bgc/sediment_stepping.jl)
 # sets the sediment at stage m to its value at the start of the step plus Δt/βᵐ times its tendency, as the water column is.
-const SEDIMENT_STEPPING = get(ENV, "MAB_BGC_SEDIMENT_STEPPING", "stages")
+const SEDIMENT_STEPPING = get(ENV, "MAB_BGC_SEDIMENT_STEPPING", "once")
 SEDIMENT_STEPPING in ("stages", "once") || error("MAB_BGC_SEDIMENT_STEPPING: stages or once, not $SEDIMENT_STEPPING")
 if SEDIMENT_MODE == :multig && SEDIMENT_STEPPING == "once"
     include(joinpath(@__DIR__, "sediment_stepping.jl"))
@@ -967,10 +967,10 @@ K_NH4 == 0.001 || say("ammonium half-saturation of the phytoplankton: $K_NH4 mmo
 # integrates the lateral flux, the sponge source and the N added by ScaleNegativeTracers, into <TAG>_nbudget_rank<r>.txt
 const NBUDGET = get(ENV, "MAB_BGC_NBUDGET", "false") == "true"
 NBUDGET && include(joinpath(@__DIR__, "nbudget.jl"))
-# MAB_BGC_SEDIMENT_THICKNESS (default false): OceanBioME adds the sediment's flux to the bottom wet cell as flux / Δzᶜᶜᶠ, the centre
+# MAB_BGC_SEDIMENT_THICKNESS (default true since 2026-10-29): OceanBioME adds the sediment's flux to the bottom wet cell as flux / Δzᶜᶜᶠ, the centre
 # spacing of the full cells, not the thickness of the (partial) bottom cell, so about half the nitrogen the sediment returns never
-# reaches the water; true (bgc/sediment_thickness.jl) divides by the cell's thickness Δzᶜᶜᶜ instead
-const SEDIMENT_THICKNESS = get(ENV, "MAB_BGC_SEDIMENT_THICKNESS", "false") == "true"
+# reaches the water; true (bgc/sediment_thickness.jl) divides by the cell's thickness Δzᶜᶜᶜ instead, false = OceanBioME as it is
+const SEDIMENT_THICKNESS = get(ENV, "MAB_BGC_SEDIMENT_THICKNESS", "true") == "true"
 SEDIMENT_THICKNESS && BGC_SEDIMENT && include(joinpath(@__DIR__, "sediment_thickness.jl"))
 SEDIMENT_THICKNESS && BGC_SEDIMENT && say("sediment-water coupling: flux divided by the thickness of the bottom cell (Δzᶜᶜᶜ), not Δzᶜᶜᶠ")
 thickness_mods = SEDIMENT_THICKNESS && BGC_SEDIMENT ? (SedimentThickness(),) : ()
