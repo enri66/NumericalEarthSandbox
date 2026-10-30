@@ -961,7 +961,20 @@ light_attenuation = OceanBioME.Light.TwoBandPhotosyntheticallyActiveRadiation(gr
 # the mean of a nitrate term and an ammonium term NH₄/(K + NH₄), so with K = 0.001 a trace of NH₄ (0.01 mmol/m³) already gives the
 # ammonium term 0.9; the other PhytoZoo parameters are LOBSTER's defaults (maximum growth rate 2.42e-5 1/s = 2.09 per day).
 const K_NH4 = parse(Float64, get(ENV, "MAB_BGC_K_NH4", "0.001"))
-plankton_kw = K_NH4 == 0.001 ? (;) : (; plankton = PhytoZoo(Float64; nutrient_half_saturations = (nitrate = 0.7, ammonia = K_NH4)))
+# MAB_BGC_PLANKTON (default none): "name=factor,..." multiplies PhytoZoo's scalar parameters of that name by the factor, e.g.
+# "maximum_grazing_rate=0.5,phytoplankton_mortality_rate=0.5" (sensitivity runs of the growth and loss terms of the plankton)
+const PLANKTON_SCALE = get(ENV, "MAB_BGC_PLANKTON", "")
+plankton_defaults = PhytoZoo(Float64)
+plankton_scaled = Dict{Symbol, Float64}()
+for item in filter(!isempty, strip.(split(PLANKTON_SCALE, ",")))
+    name, factor = split(item, "=")
+    key = Symbol(strip(name))
+    hasfield(PhytoZoo, key) && getfield(plankton_defaults, key) isa Real || error("MAB_BGC_PLANKTON: $name is not a scalar PhytoZoo parameter")
+    plankton_scaled[key] = getfield(plankton_defaults, key) * parse(Float64, factor)
+    say("plankton parameter $key: ×$factor = $(plankton_scaled[key]) (LOBSTER: $(getfield(plankton_defaults, key)))")
+end
+plankton_kw = K_NH4 == 0.001 && isempty(plankton_scaled) ? (;) :
+              (; plankton = PhytoZoo(Float64; nutrient_half_saturations = (nitrate = 0.7, ammonia = K_NH4), plankton_scaled...))
 K_NH4 == 0.001 || say("ammonium half-saturation of the phytoplankton: $K_NH4 mmol N/m³ (LOBSTER: 0.001)")
 # MAB_BGC_NBUDGET (default false): bgc/nbudget.jl sums the nitrogen of the shelf columns (< MAB_BGC_NBUDGET_DEPTH m) every hour and
 # integrates the lateral flux, the sponge source and the N added by ScaleNegativeTracers, into <TAG>_nbudget_rank<r>.txt
