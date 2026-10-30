@@ -219,6 +219,16 @@ for name in keys(regions)
     summarize(string(name, " daily mean"), series[name]..., logspace = true)
 end
 
+# by water depth: where the shelf deficit is (mean over the matched cell-days of each depth bin; ratio = mean model / mean satellite)
+say("\nsurface chlorophyll by water depth (mg/m³, matched cell-days)")
+for (lo, hi) in ((0, 20), (20, 40), (40, 60), (60, 80), (80, 100), (100, 200), (200, 1000), (1000, Inf))
+    sel = wet .& (depth .> lo) .& (depth .≤ hi) .& (cnt .> 0)
+    count(sel) == 0 && continue
+    n = sum(cnt[sel])
+    say(@sprintf("  %5.0f-%-5.0f m  columns %5d  cell-days %6d  satellite %6.3f  model %6.3f  model/satellite %.2f",
+                 lo, hi, count(sel), n, sum(sat_sum[sel]) / n, sum(mod_sum[sel]) / n, sum(mod_sum[sel]) / sum(sat_sum[sel])))
+end
+
 # ---------------- Pioneer comparison ----------------
 function obs_at(data, T; half = Hour(36), minimum_samples = 24)
     v = [x for (t, x) in data if abs(t - T) ≤ half]
