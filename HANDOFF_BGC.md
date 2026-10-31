@@ -458,7 +458,20 @@ What the columns say: a cross-shelf gradient has to come from something that dif
 - **Loss.** Zooplankton grow from 0.10 to 0.35 mmol C/m³ in the baseline and the loss rate rises from 0.03 to 0.10 per day, which stops the growth (net +0.016 per day at day 30) once the grazers have caught up; it is the consequence of the weak growth, not the cause.
 - Artifact: the growth rates print as NaN at t = 0 (the mixed-layer diffusivity field is still zero before the first update); all later rows are finite.
 
-So in the 3D run PISCES would need PO₄ well above the half-saturation (PO₄ 1.5 still gives L = 0.44 and 0.29 mg Chl/m³) or retuned half-saturations to produce a LOBSTER-like biomass; with the defaults the Mid-Atlantic Bight would be phosphate-limited in the model. Not done: the depth sweep with the higher PO₄ (to see whether the PISCES column then shows a depth gradient), and PO₄ initial and boundary data for the real domain.
+So in the 3D run PISCES would need PO₄ well above the half-saturation (PO₄ 1.5 still gives L = 0.44 and 0.29 mg Chl/m³) or retuned half-saturations to produce a LOBSTER-like biomass; with the defaults the Mid-Atlantic Bight would be phosphate-limited in the model.
+
+**PISCES depth sweep with PO₄ 5 (2026-10-31).** `column_compare.jl` with `MAB_COLUMN_MODEL=pisces MAB_COLUMN_PO4=5 MAB_COLUMN_DAYS=90`, one job per depth (triton jobs 12307-12312, 90 days; the 200 m column took about 4 h). Means over days 30-90, mg Chl/m³:
+
+| depth | surface chlorophyll | column mean | surface nitrate | diatom share | Chl:C (g/g) |
+|---|---|---|---|---|---|
+| 10 m | 0.288 | 0.289 | 2.62 | 0.59 | 0.0100 |
+| 20 m | 0.283 | 0.283 | 2.90 | 0.60 | 0.0109 |
+| 40 m | 0.282 | 0.278 | 2.97 | 0.59 | 0.0111 |
+| 60 m | 0.282 | 0.263 | 2.97 | 0.59 | 0.0111 |
+| 100 m | 0.282 | 0.223 | 2.97 | 0.59 | 0.0111 |
+| 200 m | 0.283 | 0.136 | 2.99 | 0.59 | 0.0112 |
+
+With phosphate no longer limiting as much, PISCES has 4 times the biomass of the PO₄ 0.5 sweep (0.28 against 0.07) and a diatom share of 59 % (2 % before), but the surface chlorophyll is flat with depth (0.288 at 10 m, 0.282-0.283 from 20 to 200 m), as in LOBSTER, and about a quarter of LOBSTER's 1.2. The same conclusion holds for both models: uniform per-volume forcing gives no cross-shelf gradient. Not done: a depth-dependent supply in the columns, and PO₄ initial and boundary data for the real domain.
 
 ## Practical notes
 

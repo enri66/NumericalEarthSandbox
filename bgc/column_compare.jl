@@ -11,7 +11,7 @@
 # surface nitrate and, for PISCES, the diatom share and Chl:C, every MAB_COLUMN_EVERY days and a table of the means over days 30-90.
 #   julia --project=<env with OceanBioME> bgc/column_compare.jl
 # Environment: MAB_COLUMN_MODEL (lobster | pisces), MAB_COLUMN_DEPTHS ("10,20,40,60,100,200"), MAB_COLUMN_DAYS (120), MAB_COLUMN_DT (seconds, 60: the explicit vertical diffusion needs κ Δt / Δz² < 0.5, i.e. 0.15 for 2 m cells and κ = 1e-2),
-# MAB_COLUMN_SUPPLY_DAYS (20), MAB_COLUMN_LATITUDE (39.5), MAB_COLUMN_TRANSMISSIVITY (0.55), MAB_COLUMN_EVERY (10), BGC_OUT.
+# MAB_COLUMN_SUPPLY_DAYS (20), MAB_COLUMN_PO4 (0.5, PISCES: the half-saturation of the phosphate limitation is 0.8 so 0.5 limits strongly, see HANDOFF_BGC.md), MAB_COLUMN_LATITUDE (39.5), MAB_COLUMN_TRANSMISSIVITY (0.55), MAB_COLUMN_EVERY (10), BGC_OUT.
 using OceanBioME, Oceananigans, Printf, Statistics
 using Oceananigans.Units
 using Oceananigans.Fields: FunctionField, Field
@@ -25,6 +25,7 @@ const SUPPLY   = parse(Float64, get(ENV, "MAB_COLUMN_SUPPLY_DAYS", "20")) * 8640
 const LAT      = parse(Float64, get(ENV, "MAB_COLUMN_LATITUDE", "39.5"))
 const TRANSM   = parse(Float64, get(ENV, "MAB_COLUMN_TRANSMISSIVITY", "0.55"))
 const EVERY    = parse(Float64, get(ENV, "MAB_COLUMN_EVERY", "10"))
+const PO4      = parse(Float64, get(ENV, "MAB_COLUMN_PO4", "0.5"))       # PISCES phosphate, initial and supply target (mmol P/m³)
 const OUT      = get(ENV, "BGC_OUT", ".")
 MODEL in ("lobster", "pisces") || error("MAB_COLUMN_MODEL must be lobster or pisces")
 mkpath(OUT)
@@ -62,7 +63,7 @@ function run_column(H)
         mld = Field{Center, Center, Nothing}(grid)
         biogeochemistry = PISCES(; grid, latitude = PrescribedLatitude(LAT), surface_photosynthetically_active_radiation = PAR⁰,
                                    mixed_layer_depth = mld, scale_negatives = true, invalid_fill_value = 0.0)
-        forcing = (; NO₃ = supply(4.0), PO₄ = supply(0.5), Si = supply(6.0), Fe = supply(0.3), DIC = supply(2100.0), Alk = supply(2300.0),
+        forcing = (; NO₃ = supply(4.0), PO₄ = supply(PO4), Si = supply(6.0), Fe = supply(0.3), DIC = supply(2100.0), Alk = supply(2300.0),
                      T = Relaxation(rate = 1 / 3600, target = T_target), S = Relaxation(rate = 1 / 3600, target = 33.0))
         auxiliary_fields = NamedTuple()
     end
@@ -71,7 +72,7 @@ function run_column(H)
         set!(model, P = 0.05, Z = 0.05, NO₃ = 4.0, NH₄ = 0.1)
     else
         set!(model, P = 0.3, PChl = 0.072, PFe = 0.003, D = 0.05, DChl = 0.012, DFe = 0.0005, DSi = 0.005, Z = 0.1, M = 0.3, DOC = 2.0,
-                    POC = 2.0, SFe = 0.05, GOC = 1.0, BFe = 0.03, PSi = 0.05, CaCO₃ = 1e-10, NO₃ = 4.0, NH₄ = 0.2, PO₄ = 0.5, Fe = 0.3,
+                    POC = 2.0, SFe = 0.05, GOC = 1.0, BFe = 0.03, PSi = 0.05, CaCO₃ = 1e-10, NO₃ = 4.0, NH₄ = 0.2, PO₄ = PO4, Fe = 0.3,
                     Si = 6.0, DIC = 2100.0, Alk = 2300.0, O₂ = 330.0, T = 5.0, S = 33.0)
     end
     simulation = Simulation(model; Δt, stop_time = DAYS * 86400)
