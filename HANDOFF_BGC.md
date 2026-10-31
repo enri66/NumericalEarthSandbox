@@ -471,7 +471,23 @@ So in the 3D run PISCES would need PO₄ well above the half-saturation (PO₄ 1
 | 100 m | 0.282 | 0.223 | 2.97 | 0.59 | 0.0111 |
 | 200 m | 0.283 | 0.136 | 2.99 | 0.59 | 0.0112 |
 
-With phosphate no longer limiting as much, PISCES has 4 times the biomass of the PO₄ 0.5 sweep (0.28 against 0.07) and a diatom share of 59 % (2 % before), but the surface chlorophyll is flat with depth (0.288 at 10 m, 0.282-0.283 from 20 to 200 m), as in LOBSTER, and about a quarter of LOBSTER's 1.2. The same conclusion holds for both models: uniform per-volume forcing gives no cross-shelf gradient. Not done: a depth-dependent supply in the columns, and PO₄ initial and boundary data for the real domain.
+With phosphate no longer limiting as much, PISCES has 4 times the biomass of the PO₄ 0.5 sweep (0.28 against 0.07) and a diatom share of 59 % (2 % before), but the surface chlorophyll is flat with depth (0.288 at 10 m, 0.282-0.283 from 20 to 200 m), as in LOBSTER, and about a quarter of LOBSTER's 1.2. The same conclusion holds for both models: uniform per-volume forcing gives no cross-shelf gradient. Not done here: a depth-dependent supply in the columns (next section), and PO₄ initial and boundary data for the real domain.
+
+**Benthic flux in the columns, the only depth-dependent supply (2026-10-31).** `column_compare.jl` with `MAB_COLUMN_BOTTOM_FLUX=F` (mmol N/m²/day of NH₄ into the bottom cell, in PISCES also PO₄ at F/16), so the supply per unit volume goes as F/H; everything else as before (lateral relaxation with 20 days unless `MAB_COLUMN_SUPPLY_DAYS=0`). Surface chlorophyll, means over days 30-90, mg Chl/m³ (LOBSTER jobs 12313-12315, PISCES jobs 12316-12321 with PO₄ 5):
+
+| run | 10 m | 20 m | 40 m | 60 m | 100 m | 200 m |
+|---|---|---|---|---|---|---|
+| LOBSTER, F = 0 (earlier sweep) | 1.16 | 1.17 | 1.20 | 1.20 | 1.20 | 1.20 |
+| LOBSTER, F = 2 | 1.56 | 1.38 | 1.20 | 1.20 | 1.20 | 1.20 |
+| LOBSTER, F = 5 | 2.14 | 1.67 | 1.21 | 1.20 | 1.20 | 1.20 |
+| LOBSTER, F = 2, no lateral supply | 1.18 | 0.93 | 0.63 | 0.60 | 0.60 | 0.61 |
+| PISCES (PO₄ 5), F = 0 | 0.288 | 0.283 | 0.282 | 0.282 | 0.282 | 0.283 |
+| PISCES (PO₄ 5), F = 2 | 0.295 | 0.286 | 0.282 | 0.282 | 0.282 | 0.283 |
+
+- **LOBSTER:** a benthic flux gives a cross-shelf gradient of the right sign, confined to water shallower than about 40 m (deeper columns stay at the lateral-supply value 1.2, as in the 3D run). Its size is modest: the increase over the flat value is 0.36 (F = 2) and 0.94 (F = 5) mg/m³ at 10 m, about proportional to F, so the satellite's 5.5 mg/m³ at < 20 m would need F of roughly 20 mmol N/m²/day (a linear extrapolation), far above shelf values. Without lateral supply the whole profile is supply-limited (surface nitrate 0.0-0.1) and the 10 m column is twice the deep one (1.18 against 0.60).
+- **PISCES:** no response (0.295 against 0.288 at 10 m): the extra nitrogen is not used (surface nitrate 4.3 at 10 m, 4.0 at 20 m), so PISCES with these parameters is limited by phosphate-light-chlorophyll acclimation and grazing, not by nitrogen supply.
+- So benthic regeneration is a candidate for the inshore gradient in LOBSTER but cannot by itself explain a factor 5; the rest would be river and estuarine nutrients (the RC4USCoast loads are in the 3D run) or a satellite coastal bias.
+- The 3D run's sediment already supplies this flux; the column F is a number to compare with it (the benthic NH₄ flux of the multi-G sediment on the < 20 m shelf has not been extracted in mmol N/m²/day). Not done: that comparison.
 
 ## Practical notes
 
