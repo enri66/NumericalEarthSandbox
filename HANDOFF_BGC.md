@@ -416,6 +416,33 @@ Enri's decision after the 30-day test: runs use the multi-layer sediment from no
 
 **Final figures (2026-10-30).** `bgc/figures/2026-10-30/`: `final_depth_chl.png` (chlorophyll by water depth, satellite against model, and the model/satellite ratio of the fix and the three rate-sensitivity runs), `final_nbudget.png` (the shelf nitrogen remainder before and after the thickness fix, and the mean budget terms), `chl_maps_runs.png`, `chl_series_runs.png`, `pioneer_runs.png` (`bgc/chl_comparison.jl`: before the fixes = `mg30`, both fixes = `mg30_fix`, grazing ×0.5 = `mg30_pg`); `bgc/final_summary_figures.jl` makes the first two from the text output of `validate_bgc.jl` and `nbudget_analysis.jl`. The animation and all other figures are in `~/Data/mab_analysis/bgc/final_2026-10-30/` (not in git). Best run: `bgc_feb19_woa_lim_mg30_fix` (both sediment fixes, LOBSTER defaults). The project is set aside here (2026-10-30), waiting for inshore chlorophyll data.
 
+**Variable chlorophyll:nitrogen ratio, a diagnostic (2026-10-30).** `bgc/chl_acclimation.jl` on `bgc_feb19_woa_lim_mg30_fix` (30 matched days, 12 March to 2 April; no new simulation) multiplies the model's surface P by a photoacclimated ratio (Cloern et al. 1995: Chl:C = 0.003 + 0.0154 exp(0.05 T) exp(-0.059 I) f_N, I the mixed-layer-mean daily PAR, f_N = min(1, 2 L_N), C:N 6.56) and also computes the ratio that would match the satellite. By water depth (mg Chl/mmol N; plausible range 0.4-4.7 for Chl:C 0.005-0.06 g/g; the model's fixed value is 1.31):
+
+| depth | satellite (mg/m³) | fixed/sat | Cloern/sat | required ratio | Cloern ratio |
+|---|---|---|---|---|---|
+| 0-20 m | 5.47 | 0.21 | 0.16 | 6.4 | 1.01 |
+| 20-40 m | 2.46 | 0.41 | 0.40 | 3.2 | 1.28 |
+| 40-60 m | 1.53 | 0.67 | 0.70 | 2.0 | 1.40 |
+| 60-100 m | 1.0 | 0.97-1.11 | 1.01-1.09 | 1.2-1.35 | 1.3-1.4 |
+| > 1000 m | 0.41 | 1.48 | 2.67 | 0.9 | 2.47 |
+
+A variable ratio alone does not close the inshore gap: at 0-20 m the required ratio (6.4) is above the plausible maximum (about 4.7), and even 4.7 would give 74 % of the satellite value; the model's phytoplankton nitrogen there is low (about 0.86 mmol N/m³). The acclimated ratio is about 1.0 inshore (the shallow mixed layer is bright, 13.5 mol photons/m²/day) so it does not raise inshore chlorophyll, and it makes the open ocean worse (2.67 times the satellite). At 20-60 m the required ratio (2.0-3.2) is plausible. The satellite coastal bias is still untested.
+
+**Single-column LOBSTER and PISCES, depth sweep (2026-10-31).** `bgc/column_compare.jl` (OceanBioME 0.20.2, triton; `MAB_COLUMN_MODEL=lobster|pisces`, `MAB_COLUMN_DEPTHS`) runs one column per water depth (10, 20, 40, 60, 100, 200 m) for 120 days from 1 February with identical forcing: daily-mean PAR at 39.5 N (48 W/m² on 1 Feb to 103 on 1 May), a mixed layer shoaling from 40 m to 10 m (diffusivity 1e-2 m²/s inside, 1e-5 below; a column shallower than the mixed layer is mixed to the bottom), temperature 5 to 12 °C, and the same lateral supply per unit volume at every depth (relaxation of NO₃ to 4 mmol/m³, and for PISCES PO₄ 0.5, Si 6, Fe 0.3 µmol/m³, DIC, Alk, time scale 20 days). No sediment in either (sinking particles leave through the bottom). Means over days 30-90, mg Chl/m³:
+
+| depth | LOBSTER surface | LOBSTER column mean | PISCES surface | PISCES column mean | PISCES surface nitrate |
+|---|---|---|---|---|---|
+| 10 m | 1.16 | 1.16 | 0.074 | 0.074 | 3.69 |
+| 20 m | 1.17 | 1.15 | 0.075 | 0.075 | 3.73 |
+| 40 m | 1.20 | 0.92 | 0.078 | 0.077 | 3.75 |
+| 60 m | 1.20 | 0.68 | 0.078 | 0.080 | 3.75 |
+| 100 m | 1.20 | 0.44 | 0.078 | 0.078 | 3.75 |
+| 200 m | 1.20 | 0.25 | 0.078 | 0.061 | 3.75 |
+
+Neither model gives a depth gradient of surface chlorophyll under uniform per-volume forcing. LOBSTER sits at 1.2 mg/m³ at every depth (the same flat value as the 3D run), set by its plankton balance and the supply, not by the light or mixing of each depth. PISCES in this setup is nearly empty: 0.07 mg/m³, Chl:C 0.005 g/g, surface nitrate stays at 3.7 (not limiting), the diatom share falls from 14 % to 2 %, no bloom. The cause is not diagnosed (iron, which is supplied only as a 0.3 µmol/m³ relaxation and scavenged, and grazing are the first suspects); this is an untuned idealised setup and says nothing yet about PISCES in the real domain. PISCES needs `invalid_fill_value = 0` (the default NaN spreads from one unscalable tracer) and, with 2 m cells and kappa 1e-2, a 60 s step (300 s was unstable: explicit vertical diffusion). One PISCES column of 120 days takes more than 4 hours.
+
+What the columns say: a cross-shelf gradient has to come from something that differs with depth, such as benthic recycling per unit volume (proportional to 1/depth), river and estuarine input, or exchange at the shelf break, not from the light and mixing of the column. Next steps (not done): a depth-dependent supply in the columns (shorter relaxation inshore, or a bottom flux), and the limitation terms of PISCES to see why it is empty.
+
 ## Practical notes
 
 - Sandbox: `~/Dropbox/Models/NumericalEarthSandbox` (Mac) and `/t0/workdir/enrique/Models/NumericalEarthSandbox`
