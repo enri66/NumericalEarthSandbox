@@ -487,7 +487,16 @@ With phosphate no longer limiting as much, PISCES has 4 times the biomass of the
 - **LOBSTER:** a benthic flux gives a cross-shelf gradient of the right sign, confined to water shallower than about 40 m (deeper columns stay at the lateral-supply value 1.2, as in the 3D run). Its size is modest: the increase over the flat value is 0.36 (F = 2) and 0.94 (F = 5) mg/m³ at 10 m, about proportional to F, so the satellite's 5.5 mg/m³ at < 20 m would need F of roughly 20 mmol N/m²/day (a linear extrapolation), far above shelf values. Without lateral supply the whole profile is supply-limited (surface nitrate 0.0-0.1) and the 10 m column is twice the deep one (1.18 against 0.60).
 - **PISCES:** no response (0.295 against 0.288 at 10 m): the extra nitrogen is not used (surface nitrate 4.3 at 10 m, 4.0 at 20 m), so PISCES with these parameters is limited by phosphate-light-chlorophyll acclimation and grazing, not by nitrogen supply.
 - So benthic regeneration is a candidate for the inshore gradient in LOBSTER but cannot by itself explain a factor 5; the rest would be river and estuarine nutrients (the RC4USCoast loads are in the 3D run) or a satellite coastal bias.
-- The 3D run's sediment already supplies this flux; the column F is a number to compare with it (the benthic NH₄ flux of the multi-G sediment on the < 20 m shelf has not been extracted in mmol N/m²/day). Not done: that comparison.
+- The 3D run's sediment already supplies this flux. `bgc/benthic_flux_by_depth.jl` on `bgc_feb19_woa_lim_mg30_fix` (sediment daily means, days 40-65, 26 days; triton job 12328, output `/t0/workdir/enrique/runs/analysis/benthic_flux_bgc_feb19_woa_lim_mg30_fix/summary.txt`), mmol N/m²/day (return = 0.2 Ns + 2 Nf; no model columns are shallower than 10 m):
+
+| depth | columns | sinking flux | return to the water | Ns | Nf | Nr (mmol N/m²) |
+|---|---|---|---|---|---|---|
+| 10-20 m | 588 | 1.73 | 1.51 | 1.80 | 0.57 | 2.76 |
+| 20-40 m | 658 | 2.19 | 1.92 | 2.31 | 0.73 | 3.62 |
+| 40-60 m | 532 | 2.62 | 2.28 | 2.72 | 0.87 | 4.18 |
+| 60-100 m | 648 | 2.10 | 1.83 | 2.19 | 0.70 | 3.37 |
+
+  So the 3D benthic return (1.5-2.3) is the same size as the column test F = 2, and it is already in the run: per unit area it is smaller inshore than at 40-60 m (the sinking flux is, too), and per unit volume it goes as 1/H as in the columns. The column gain it gives LOBSTER at 10-20 m (+0.2 to +0.4 mg/m³) is therefore already part of the 3D shelf value (about 1 mg/m³), and the benthic flux cannot account for the missing 4 mg/m³ inshore. The lower sinking flux inshore (1.7 against 2.6 mmol N/m²/day at 40-60 m) is the model's weaker inshore production, the other face of the same deficit.
 
 ## Practical notes
 
