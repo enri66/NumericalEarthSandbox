@@ -216,10 +216,12 @@ const ZSTAR = get(ENV, "MAB_ZSTAR", "false") == "true"
 # no `Open`, and its Bounded sides take open boundary conditions
 const LATERAL_TOPOLOGY = isdefined(Oceananigans.Grids, :Open) ? Oceananigans.Grids.Open : Bounded
 const TOPOLOGY = (LATERAL_TOPOLOGY, LATERAL_TOPOLOGY, Bounded)
+# the model grid's halo: 7, or 8 for MAB_MOMENTUM_ADVECTION=ecupwind, whose symmetric pairing reads one point beyond WENO-9
+const MODEL_HALO = get(ENV, "MAB_MOMENTUM_ADVECTION", "default") == "ecupwind" ? (8, 8, 7) : (7, 7, 7)
 
 # The whole-domain grid and bathymetry: the same on every rank, computed serially exactly as in 04.
 whole_grid = LatitudeLongitudeGrid(CPU(); size = (Nλ, Nφ, Nz), topology = TOPOLOGY,
-                                   longitude = λ_bounds, latitude = φ_bounds, z, halo = (7, 7, 7))
+                                   longitude = λ_bounds, latitude = φ_bounds, z, halo = MODEL_HALO)
 # MAB_BATHYMETRY: "cellmean" (default) — each cell is the mean of the dataset's points inside it (cell_mean_bathymetry.jl),
 # which keeps the dataset's resolution down to the grid scale; "regrid" — regrid_bathymetry with 10 interpolation passes, as
 # up to 2026-11-02, whose passes run on global grids and smooth the bathymetry to about 1/8° at 1/60° (1/6° at 1/12°).
@@ -280,7 +282,7 @@ const J_OFF = (arch.local_index[2] - 1) * (Nφ ÷ PARTITION_Y)
 
 model_z = ZSTAR ? MutableVerticalDiscretization(collect(znodes(whole_grid, Face()))) : z
 dist_grid = LatitudeLongitudeGrid(arch; size = (Nλ, Nφ, Nz), topology = TOPOLOGY,
-                                  longitude = λ_bounds, latitude = φ_bounds, z = model_z, halo = (7, 7, 7))
+                                  longitude = λ_bounds, latitude = φ_bounds, z = model_z, halo = MODEL_HALO)
 local_bottom = Field{Center, Center, Nothing}(dist_grid)
 set!(local_bottom, reshape(Array(interior(bottom_height))[I_OFF+1:I_OFF+dist_grid.Nx, J_OFF+1:J_OFF+dist_grid.Ny, 1],
                            dist_grid.Nx, dist_grid.Ny, 1))
@@ -891,16 +893,42 @@ CLOSURE == "constant" && (closure_kw = (; closure = VerticalScalarDiffusivity(Ve
 CLOSURE == "ri" && (closure_kw = (; closure = RiBasedVerticalDiffusivity()))
 CLOSURE == "catke" || say("closure: $CLOSURE in place of CATKE")
 isempty(CATKE_CHANGES) || say("CATKE parameter changes: " * join(["$k = $v" for (k, v) in CATKE_CHANGES], ", "))
+# MAB_BIHARMONIC_VELOCITY (m/s, default 0 = none): a horizontal biharmonic viscosity ν₄ = U Δ³, with Δ the zonal grid
+# spacing (the smaller one), so the grid-scale damping time Δ⁴/ν₄ = Δ/U is the same at every resolution (0.02 m/s gives
+# ν₄ ≈ 8e9 m⁴/s at 1/12° and 6e7 m⁴/s at 1/60° at 38°N), added to the vertical closure
+const BIHARMONIC_VELOCITY = parse(Float64, get(ENV, "MAB_BIHARMONIC_VELOCITY", "0"))
+@inline biharmonic_viscosity(λ, φ, z, t) = BIHARMONIC_VELOCITY * (6.371e6 * deg2rad(resolution) * cosd(φ))^3
+if BIHARMONIC_VELOCITY > 0
+    vertical_closure = haskey(closure_kw, :closure) ? closure_kw.closure : NumericalEarth.Oceans.default_ocean_closure()
+    closure_kw = (; closure = (vertical_closure, HorizontalScalarBiharmonicDiffusivity(ν = biharmonic_viscosity)))
+    say(@sprintf("horizontal biharmonic viscosity ν₄ = %g m/s × Δ³: %.2g m⁴/s at %.0f°N", BIHARMONIC_VELOCITY,
+                 biharmonic_viscosity(0, 38, 0, 0), 38))
+end
 # Momentum advection: "default" (NumericalEarth's WENOVectorInvariant: WENO order 9 for the vorticity flux, order 5
-# for vertical advection, divergence and the kinetic-energy gradient) or "weno9" (order 9 for all four, less
-# dissipative; needs halos of at least 5, the grid has 7)
+# for vertical advection, divergence and the kinetic-energy gradient), "weno9" (order 9 for all four, less dissipative;
+# needs halos of at least 5, the grid has 7), "ecupwind" (the default with its vorticity flux paired symmetrically between
+# u and v, EnergyConservingUpwinding, which dissipates enstrophy but not kinetic energy) or "centered" (no WENO:
+# Oceananigans' VectorInvariant(), an enstrophy-conserving vorticity flux and energy-conserving second-order vertical
+# advection, divergence and kinetic-energy gradient, all explicit; use with MAB_BIHARMONIC_VELOCITY)
 const MOMENTUM_ADVECTION = get(ENV, "MAB_MOMENTUM_ADVECTION", "default")
-MOMENTUM_ADVECTION in ("default", "weno9", "explicit") ||
-    error("MAB_MOMENTUM_ADVECTION must be default, weno9 or explicit, got $MOMENTUM_ADVECTION")
-advection_kw = MOMENTUM_ADVECTION == "weno9" ?
-    (; momentum_advection = WENOVectorInvariant(order = 9, time_discretization = AdaptiveVerticallyImplicitDiscretization(cfl = 0.5))) :
-               MOMENTUM_ADVECTION == "explicit" ? (; momentum_advection = WENOVectorInvariant()) : (;)
-MOMENTUM_ADVECTION == "default" || say("momentum advection: $(MOMENTUM_ADVECTION == "weno9" ? "WENOVectorInvariant, order 9 throughout" : "WENOVectorInvariant, vertical advection explicit")")
+MOMENTUM_ADVECTION in ("default", "weno9", "explicit", "ecupwind", "centered") ||
+    error("MAB_MOMENTUM_ADVECTION must be default, weno9, explicit, ecupwind or centered, got $MOMENTUM_ADVECTION")
+function momentum_scheme(name)
+    adaptive = AdaptiveVerticallyImplicitDiscretization(cfl = 0.5)
+    vertical = WENO(order = 5, minimum_buffer_upwind_order = 1, time_discretization = adaptive)
+    name == "weno9" && return WENOVectorInvariant(order = 9, time_discretization = adaptive)
+    name == "explicit" && return WENOVectorInvariant()
+    if name == "ecupwind"
+        weno5 = WENO(order = 5, minimum_buffer_upwind_order = 1)
+        vorticity = Oceananigans.Advection.EnergyConservingUpwinding(WENO(order = 9, minimum_buffer_upwind_order = 1))
+        return VectorInvariant(vorticity_scheme = vorticity, vertical_advection_scheme = vertical,
+                               divergence_scheme = weno5, kinetic_energy_gradient_scheme = weno5,
+                               upwinding = Oceananigans.Advection.OnlySelfUpwinding(cross_scheme = weno5))
+    end
+    return VectorInvariant()
+end
+advection_kw = MOMENTUM_ADVECTION == "default" ? (;) : (; momentum_advection = momentum_scheme(MOMENTUM_ADVECTION))
+MOMENTUM_ADVECTION == "default" || say("momentum advection: $MOMENTUM_ADVECTION, $(summary(advection_kw.momentum_advection))")
 # MAB_TRACER_ADVECTION: "default" (NumericalEarth's: WENO order 7, vertical advection adaptively implicit above a CFL of
 # 0.5), "weno7" or "weno5" (WENO of that order, vertical advection explicit)
 const TRACER_ADVECTION = get(ENV, "MAB_TRACER_ADVECTION", "default")
