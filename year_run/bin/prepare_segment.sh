@@ -1,7 +1,8 @@
 #!/bin/bash
 # Decide the next segment and write $OUT/segment.env (SEGMENT, MAB_TAG, MAB_PICKUP). Exit 3 on a crash loop.
-# After a failure at simulated time t_c the new segment picks up from the newest complete checkpoint at or before t_c - 3 days, so
-# the 6-day Lanczos daily output (whose filter state is not checkpointed) is valid again by the time t_c is reached again.
+# After a failure at simulated time t_c the new segment picks up from the newest complete checkpoint at or before t_c - 7 days, so
+# the daily output has no gap: the 6-day Lanczos filter (whose state is not checkpointed) writes day n at n + 3, so the failed
+# segment's last daily output is about t_c - 3, and the new segment's first is pickup + 4.
 . /t0/workdir/enrique/year_run/config.env
 . $RUN_ROOT/bin/lib.sh
 cd $OUT; mkdir -p logs
@@ -21,7 +22,7 @@ else
             echo "crash loop: failures at iterations $t1 $t2 $t3 made no progress" > STOP; exit 3
         fi
     fi
-    target=$((tc - 3 * DAY_ITERS))
+    target=$((tc - 7 * DAY_ITERS))
     PICKUP=false
     for it in $(complete_iterations); do [ $it -le $target ] && [ $it -gt 0 ] && PICKUP=$it; done
 fi
