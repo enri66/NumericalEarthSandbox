@@ -9,41 +9,21 @@
 #   cells that regrid_bathymetry made land but whose fraction is at most `threshold` become wet at the minimum depth;
 #   cells that become land are set to +1 m (the height_above_water value), and `remove_minor_basins!` keeps the
 #   largest basin as before.
-# Depths of the cells that stay wet are untouched (smoothed, with land mixed in at +1 m, as before).
-using NumericalEarth.DataWrangling: Metadatum, metadata_path
+# Depths of the cells that stay wet are untouched. The land fraction can come from another dataset (`dataset`), e.g. GEBCO.
 using Printf
+@isdefined(dataset_cell_statistics) || include(joinpath(@__DIR__, "cell_mean_bathymetry.jl"))
 
-const ETOPO_NC = NumericalEarth.DataWrangling.NCDatasets
-
-"Fraction (0-1) of ETOPO2022's points above sea level in each cell of `grid`; (Nx, Ny)."
-function etopo_land_fraction(grid)
-    path = metadata_path(Metadatum(:bottom_height; dataset = ETOPO2022()))
-    ds = ETOPO_NC.Dataset(path)
-    lon = Float64.(ds["lon"][:]); lat = Float64.(ds["lat"][:])
-    λf = Float64.(collect(Oceananigans.Grids.λnodes(grid, Oceananigans.Face())))
-    φf = Float64.(collect(Oceananigans.Grids.φnodes(grid, Oceananigans.Face())))
-    Nx, Ny = size(grid, 1), size(grid, 2)
-    ilon = findall(x -> λf[1] <= x <= λf[end], lon); ilat = findall(y -> φf[1] <= y <= φf[end], lat)
-    z = ds["z"][ilon, ilat]
-    close(ds)
-    Δλ = (λf[end] - λf[1]) / Nx; Δφ = (φf[end] - φf[1]) / Ny
-    land = zeros(Int, Nx, Ny); total = zeros(Int, Nx, Ny)
-    for (b, y) in enumerate(lat[ilat]), (a, x) in enumerate(lon[ilon])
-        i = clamp(floor(Int, (x - λf[1]) / Δλ) + 1, 1, Nx); j = clamp(floor(Int, (y - φf[1]) / Δφ) + 1, 1, Ny)
-        total[i, j] += 1
-        (!ismissing(z[a, b]) && z[a, b] > 0) && (land[i, j] += 1)
-    end
-    return land ./ max.(total, 1)
-end
+"Fraction (0-1) of `dataset`'s points above sea level in each cell of `grid`; (Nx, Ny)."
+etopo_land_fraction(grid; dataset = ETOPO2022()) = dataset_cell_statistics(grid, dataset)[2]
 
 """
-    apply_land_fraction!(bottom_height, grid, threshold; minimum_depth = 10, major_basins = 1, say = println)
+    apply_land_fraction!(bottom_height, grid, threshold; dataset = ETOPO2022(), minimum_depth = 10, major_basins = 1, say = println)
 
 Replace the land/wet decision of `bottom_height` (a `Field{Center, Center, Nothing}` on `grid`, wet where negative) by
-the ETOPO land fraction > `threshold`, as described at the top of this file. Reports what changed.
+the land fraction of `dataset` > `threshold`, as described at the top of this file. Reports what changed.
 """
-function apply_land_fraction!(bottom_height, grid, threshold; minimum_depth = 10, major_basins = 1, say = println)
-    f = etopo_land_fraction(grid)
+function apply_land_fraction!(bottom_height, grid, threshold; dataset = ETOPO2022(), minimum_depth = 10, major_basins = 1, say = println)
+    f = etopo_land_fraction(grid; dataset)
     h = Array(interior(bottom_height))[:, :, 1]
     was_land = h .>= 0
     now_land = f .> threshold

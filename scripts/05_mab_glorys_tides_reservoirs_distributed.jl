@@ -220,17 +220,32 @@ const TOPOLOGY = (LATERAL_TOPOLOGY, LATERAL_TOPOLOGY, Bounded)
 # The whole-domain grid and bathymetry: the same on every rank, computed serially exactly as in 04.
 whole_grid = LatitudeLongitudeGrid(CPU(); size = (Nλ, Nφ, Nz), topology = TOPOLOGY,
                                    longitude = λ_bounds, latitude = φ_bounds, z, halo = (7, 7, 7))
-# Every rank regrids the bathymetry itself, with the disk cache off. `regrid_bathymetry` calls `download`, whose `@root` has
-# an MPI barrier, only when the cache misses, so with the cache on the number of barriers depends on whether each rank
-# sees a cache file: ranks drift out of step (hang) or all regrid and write the file at once (truncated file). With the
-# cache off every rank makes exactly one matching barrier call, reads nothing and writes nothing. The cost is a regrid
-# at every start (seconds at 1/12 degree, minutes at 1/60 degree).
-make_bathymetry() = regrid_bathymetry(whole_grid; dataset = ETOPO2022(), height_above_water = 1, cache = false,
-                                      minimum_depth = 10, major_basins = 1, interpolation_passes = 10)
+# MAB_BATHYMETRY: "cellmean" (default) — each cell is the mean of the dataset's points inside it (cell_mean_bathymetry.jl),
+# which keeps the dataset's resolution down to the grid scale; "regrid" — regrid_bathymetry with 10 interpolation passes, as
+# up to 2026-11-02, whose passes run on global grids and smooth the bathymetry to about 1/8° at 1/60° (1/6° at 1/12°).
+# MAB_BATHYMETRY_DATASET: "gebco2026" (default, 15 arc-second) or "etopo2022" (60 arc-second), for the depths and the land
+# fraction; the dataset file must already be on disk. Runs before 2026-11-02 (the year run among them) used
+# MAB_BATHYMETRY=regrid MAB_BATHYMETRY_DATASET=etopo2022. regrid loads the whole global dataset (15 GB for GEBCO).
+const BATHYMETRY = get(ENV, "MAB_BATHYMETRY", "cellmean")
+BATHYMETRY in ("cellmean", "regrid") || error("MAB_BATHYMETRY must be cellmean or regrid, got $BATHYMETRY")
+const BATHYMETRY_DATASET = get(ENV, "MAB_BATHYMETRY_DATASET", "gebco2026")
+const bathymetry_dataset = BATHYMETRY_DATASET == "etopo2022" ? ETOPO2022() :
+                           BATHYMETRY_DATASET == "gebco2026" ? NumericalEarth.DataWrangling.GEBCO.GEBCO2026() :
+                           error("MAB_BATHYMETRY_DATASET must be etopo2022 or gebco2026, got $BATHYMETRY_DATASET")
+include(joinpath(@__DIR__, "cell_mean_bathymetry.jl"))
+# Every rank computes the bathymetry itself, with regrid_bathymetry's disk cache off. `regrid_bathymetry` calls `download`,
+# whose `@root` has an MPI barrier, only when the cache misses, so with the cache on the number of barriers depends on
+# whether each rank sees a cache file: ranks drift out of step (hang) or all regrid and write the file at once (truncated
+# file). With the cache off every rank makes exactly one matching barrier call, reads nothing and writes nothing.
+make_bathymetry() = BATHYMETRY == "cellmean" ?
+    cell_mean_bathymetry(whole_grid, bathymetry_dataset; height_above_water = 1, minimum_depth = 10, major_basins = 1) :
+    regrid_bathymetry(whole_grid; dataset = bathymetry_dataset, height_above_water = 1, cache = false,
+                      minimum_depth = 10, major_basins = 1, interpolation_passes = 10)
 bottom_height = make_bathymetry()
+say("bathymetry: $BATHYMETRY from $BATHYMETRY_DATASET")
 if LAND_FRACTION > 0
     include(joinpath(@__DIR__, "land_fraction_mask.jl"))
-    apply_land_fraction!(bottom_height, whole_grid, LAND_FRACTION; minimum_depth = 10, say)
+    apply_land_fraction!(bottom_height, whole_grid, LAND_FRACTION; dataset = bathymetry_dataset, minimum_depth = 10, say)
 end
 
 # MAB_MASK_CLEANUP=true (default false): clean the coastline (mask_cleanup.jl: water cut off from the open ocean, one-cell
