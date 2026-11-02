@@ -475,11 +475,14 @@ for (name, f) in ((MODEL_NAME, model_field), ("GLORYS", glorys), ("satellite", s
     @printf("  %-12s share of the axis with R < 100 km %4.1f%%, < 200 km %4.1f%%; folding back: %4.1f%% of the axis, on %d of %d maps; within 30° of north-south: %4.1f%%\n",
             name, 100 * mean(a .> 1 / 100), 100 * mean(a .> 1 / 200), 100 * mean(filter(isfinite, fold)),
             count(x -> isfinite(x) && x > 0, fold), length(fold), 100 * mean(filter(isfinite, steep)))
-    # with the axis running eastward, a crest (bending north, towards the Slope Sea: warm-core rings) turns clockwise (κ < 0)
-    # and a trough (bending south: cold-core rings) anticlockwise (κ > 0)
-    κ = reduce(vcat, [r[1] for r in res]) .* 1e3; e = reduce(vcat, [r[4] for r in res])
-    @printf("  %-12s   crests: R < 100 km %4.1f%%, folding back %4.2f%%;  troughs: R < 100 km %4.1f%%, folding back %4.2f%%\n",
-            "", 100 * mean(κ .< -1 / 100), 100 * mean((e .< 0) .& (κ .< 0)), 100 * mean(κ .> 1 / 100), 100 * mean((e .< 0) .& (κ .> 0)))
+    # the axis points that fold back, for following those meanders in the 3-hourly output (foldback_events.jl); whether a
+    # fold-back belongs to a crest or a trough is not given by the sign of κ (an overhang curves both ways), so they are all kept
+    open(joinpath(OUTDIR, "foldback_points_$(replace(name, ' ' => '_')).csv"), "w") do io
+        println(io, "date,lon,lat,curvature_per_km")
+        for (d, r) in zip(cdays, res), k in eachindex(r[1])
+            r[4][k] < 0 && @printf(io, "%s,%.3f,%.3f,%.5f\n", d, r[2][k], r[3][k], 1e3 * r[1][k])
+        end
+    end
 end
 fig = Figure(size = (900, 500), fontsize = 16)
 ax = Axis(fig[1, 1], xlabel = "radius of curvature R (km)", ylabel = "share of the axis with a radius below R",
