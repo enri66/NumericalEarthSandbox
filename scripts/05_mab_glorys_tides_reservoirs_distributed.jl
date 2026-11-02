@@ -212,9 +212,13 @@ model_bottom(h) = BOTTOM == "partial" ? PartialCellBottom(h; minimum_fractional_
 # MAB_ZSTAR=true: a z-star vertical coordinate on the model grid (each column's cells stretch with the free surface by
 # (H + η) / H, and the surface freshwater flux adds volume); the whole-domain grid used for the tables stays static
 const ZSTAR = get(ENV, "MAB_ZSTAR", "false") == "true"
+# Oceananigans 0.117 rejects open boundary conditions on a Bounded side and has an `Open` topology for them; 0.114 has
+# no `Open`, and its Bounded sides take open boundary conditions
+const LATERAL_TOPOLOGY = isdefined(Oceananigans.Grids, :Open) ? Oceananigans.Grids.Open : Bounded
+const TOPOLOGY = (LATERAL_TOPOLOGY, LATERAL_TOPOLOGY, Bounded)
 
 # The whole-domain grid and bathymetry: the same on every rank, computed serially exactly as in 04.
-whole_grid = LatitudeLongitudeGrid(CPU(); size = (Nλ, Nφ, Nz),
+whole_grid = LatitudeLongitudeGrid(CPU(); size = (Nλ, Nφ, Nz), topology = TOPOLOGY,
                                    longitude = λ_bounds, latitude = φ_bounds, z, halo = (7, 7, 7))
 # Every rank regrids the bathymetry itself, with the disk cache off. `regrid_bathymetry` calls `download`, whose `@root` has
 # an MPI barrier, only when the cache misses, so with the cache on the number of barriers depends on whether each rank
@@ -260,7 +264,7 @@ const I_OFF = (arch.local_index[1] - 1) * (Nλ ÷ PARTITION_X)
 const J_OFF = (arch.local_index[2] - 1) * (Nφ ÷ PARTITION_Y)
 
 model_z = ZSTAR ? MutableVerticalDiscretization(collect(znodes(whole_grid, Face()))) : z
-dist_grid = LatitudeLongitudeGrid(arch; size = (Nλ, Nφ, Nz),
+dist_grid = LatitudeLongitudeGrid(arch; size = (Nλ, Nφ, Nz), topology = TOPOLOGY,
                                   longitude = λ_bounds, latitude = φ_bounds, z = model_z, halo = (7, 7, 7))
 local_bottom = Field{Center, Center, Nothing}(dist_grid)
 set!(local_bottom, reshape(Array(interior(bottom_height))[I_OFF+1:I_OFF+dist_grid.Nx, J_OFF+1:J_OFF+dist_grid.Ny, 1],
@@ -306,8 +310,12 @@ meta(name) = Metadata(name; dataset = glorys, dates, dir = DATA_DIR, region)
 # the first frame until its time.
 const GLORYS_TIME_INDEXING = get(ENV, "MAB_GLORYS_TIME_INDEXING", "clamp")
 GLORYS_TIME_INDEXING in ("clamp", "cyclical") || error("MAB_GLORYS_TIME_INDEXING must be clamp or cyclical, got $GLORYS_TIME_INDEXING")
-glorys_series(name, grid) = GLORYS_TIME_INDEXING == "clamp" ? FieldTimeSeries(meta(name), grid; time_indexing = Oceananigans.OutputReaders.Clamp()) :
-                                                               FieldTimeSeries(meta(name), grid)
+# MAB_GLORYS_TIME_INDICES: daily frames held in memory (default 3). With 2, every run on Oceananigans 0.117 stops at day
+# 1.5 with an ArgumentError: a time step that straddles a noon frame needs 3.
+const GLORYS_TIME_INDICES = parse(Int, get(ENV, "MAB_GLORYS_TIME_INDICES", "3"))
+glorys_series(name, grid) = GLORYS_TIME_INDEXING == "clamp" ?
+    FieldTimeSeries(meta(name), grid; time_indices_in_memory = GLORYS_TIME_INDICES, time_indexing = Oceananigans.OutputReaders.Clamp()) :
+    FieldTimeSeries(meta(name), grid; time_indices_in_memory = GLORYS_TIME_INDICES)
 
 say("building GLORYS FieldTimeSeries on the whole-domain source grid (downloads/inpaints as needed, $GLORYS_TIME_INDEXING in time)…")
 build_glorys_series() = (glorys_series(:u_velocity,  src_grid), glorys_series(:v_velocity, src_grid),
