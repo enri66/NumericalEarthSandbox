@@ -564,7 +564,7 @@ title = @lift @sprintf("De-tided SSH and warm-core rings  %s (day %d)", cdays[$k
 fig = Figure(size = (2400, 700), fontsize = 18)
 Label(fig[0, 1:4], title, fontsize = 22)
 lims = ((-80, -52), (32, 44.5))
-a1 = Axis(fig[1, 1], aspect = DataAspect(), title = "model (1/60°)", limits = lims)
+a1 = Axis(fig[1, 1], aspect = DataAspect(), title = "$MODEL_NAME (1/$(CPD)°)", limits = lims)
 a2 = Axis(fig[1, 2], aspect = DataAspect(), title = "GLORYS (1/12°)", limits = lims)
 a3 = Axis(fig[1, 3], aspect = DataAspect(), title = "satellite altimetry (DUACS L4, 1/8°)", limits = lims)
 hm = heatmap!(a1, λm, φm, mframe; colormap = :balance, colorrange = (-1.2, 1.2), nan_color = :gray80)
