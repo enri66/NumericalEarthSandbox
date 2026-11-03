@@ -71,7 +71,7 @@ wet = [any(Hm[i, j, n] != Hm[i, j, 1] for n in axes(Hm, 3)) for i in 1:Nx, j in 
 # check of the rank layout: SSH jumps across the rank edges against those between ordinary neighbouring cells
 function seam_ratio()
     d(i, j) = (wet[i, j] && wet[i+1, j]) ? abs(Hm[i+1, j, end] - Hm[i, j, end]) : NaN
-    seams = filter(isfinite, [d(b * NXR, j) for b in 1:PX-1 for j in 1:Ny])
+    seams = filter(isfinite, Float64[d(b * NXR, j) for b in 1:PX-1 for j in 1:Ny])    # empty (NaN ratio) on one rank
     others = filter(isfinite, [d(i, j) for i in 1:Nx-1 for j in 1:Ny if i % NXR != 0])
     return mean(seams) / mean(others)
 end
