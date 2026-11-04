@@ -1,0 +1,49 @@
+#!/bin/bash
+# Attach to (or start) a persistent Claude Code session inside tmux, so it survives SSH drops.
+#
+#   claude-session            attach to tmux session "claude", or start it and continue the last conversation
+#   claude-session -n         start a fresh conversation instead of continuing
+#   claude-session -r         run `claude remote-control`, so the session also shows up in the Claude app
+#   claude-session -s NAME    use tmux session NAME (default: claude); one per project works well
+#   claude-session -d DIR     working directory (default: $CLAUDE_SESSION_DIR or ~/Models/NumericalEarthSandbox)
+#
+# Install on antares:  ln -s ~/Models/NumericalEarthSandbox/scripts/claude-session ~/bin/claude-session
+# Detach with Ctrl-b d; Claude keeps running. Run claude-session again to reattach.
+
+NAME=claude
+DIR=${CLAUDE_SESSION_DIR:-~/Models/NumericalEarthSandbox}
+MODE=continue
+
+while getopts "nrs:d:h" opt; do
+    case $opt in
+        n) MODE=new ;;
+        r) MODE=remote ;;
+        s) NAME=$OPTARG ;;
+        d) DIR=$OPTARG ;;
+        *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+    esac
+done
+
+export PATH="$HOME/.local/bin:$PATH"  # where the native installer puts claude
+command -v tmux   >/dev/null || { echo "tmux not found"; exit 1; }
+command -v claude >/dev/null || { echo "claude not found; install with: curl -fsSL https://claude.ai/install.sh | bash"; exit 1; }
+
+if ! tmux has-session -t "=$NAME" 2>/dev/null; then
+    [ -d "$DIR" ] || { echo "no such directory: $DIR (set CLAUDE_SESSION_DIR or pass -d)"; exit 1; }
+    case $MODE in
+        continue) CMD='claude --continue || claude' ;;  # --continue fails when the folder has no past conversation
+        new)      CMD='claude' ;;
+        remote)   CMD='claude remote-control' ;;
+    esac
+    # Drop to a shell when Claude exits, so the window stays open to restart it
+    tmux new-session -d -s "$NAME" -c "$DIR" "$CMD; echo; echo 'Claude exited. Run claude to start again.'; exec \$SHELL -l"
+elif [ "$MODE" != continue ]; then
+    echo "tmux session '$NAME' already exists; attaching (-n/-r only apply to a new session)"
+    sleep 1
+fi
+
+if [ -n "$TMUX" ]; then
+    exec tmux switch-client -t "=$NAME"
+else
+    exec tmux attach-session -t "=$NAME"
+fi
