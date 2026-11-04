@@ -1,0 +1,4 @@
+# Land-mask overrides for script 05's "mabx" region (MAB_MASK_OVERRIDES), applied after mask_cleanup.jl's automatic steps.
+# Layout (mask_cleanup.jl): action,i,j for one cell, or action,lon0,lon1,lat0,lat1 for the cells whose centres are in the box.
+# The head of Chignecto Bay, 64.54°W 45.79°N: at 1/12° a single 10 m cell on the north open boundary
+land,-64.56,-64.52,45.77,45.81

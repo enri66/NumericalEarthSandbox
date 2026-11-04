@@ -13,10 +13,12 @@ const OUTDIR = ENV["FOLDBACK_OUT"]
 mkpath(OUTDIR)
 const CPD = parse(Int, get(ENV, "MAB_CELLS_PER_DEGREE", "60"))
 const PX = parse(Int, get(ENV, "MAB_PARTITION_X", "7")); const PY = parse(Int, get(ENV, "MAB_PARTITION_Y", "4"))
-Nx, Ny = round(Int, (12 - 4 / 12) * CPD), round(Int, (8 - 4 / 12) * CPD)
+const REGIONS = Dict("mab" => ((-76.0, -64.0), (34.0, 42.0)), "mabx" => ((-76.0, -56.0), (34.0, 46.0)))   # script 05's
+const data_λ, data_φ = REGIONS[get(ENV, "MAB_REGION", "mab")]
+Nx = round(Int, (data_λ[2] - data_λ[1] - 4 / 12) * CPD); Ny = round(Int, (data_φ[2] - data_φ[1] - 4 / 12) * CPD)
 const NXR, NYR = Nx ÷ PX, Ny ÷ PY
-λm = [-76 + 2 / 12 + (i - 0.5) / CPD for i in 1:Nx]
-φm = [34 + 2 / 12 + (j - 0.5) / CPD for j in 1:Ny]
+λm = [data_λ[1] + 2 / 12 + (i - 0.5) / CPD for i in 1:Nx]
+φm = [data_φ[1] + 2 / 12 + (j - 0.5) / CPD for j in 1:Ny]
 const Rₑ, Ω = 6.371e6, 7.292e-5
 dist(a, b) = Rₑ * acos(clamp(sind(a[2]) * sind(b[2]) + cosd(a[2]) * cosd(b[2]) * cosd(a[1] - b[1]), -1, 1))
 

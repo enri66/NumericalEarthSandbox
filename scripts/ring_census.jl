@@ -27,14 +27,16 @@ const Rₑ   = 6.371e6
 
 # ---------------- model: de-tided daily SSH of all segments ----------------
 # The ranks' serialized grids hold an Open MPI communicator, which an MPICH build of MPI.jl cannot read back, so the
-# layout comes from the run's configuration instead: MAB_CELLS_PER_DEGREE over 75.83-64.17W, 34.17-41.83N (script 05's
-# "mab" region less 2 GLORYS cells), MAB_PARTITION_X x MAB_PARTITION_Y ranks, rank r at x-block r ÷ PY + 1, y-block r % PY + 1.
+# layout comes from the run's configuration instead: MAB_CELLS_PER_DEGREE over script 05's MAB_REGION ("mab", the default,
+# or "mabx") less 2 GLORYS cells, MAB_PARTITION_X x MAB_PARTITION_Y ranks, rank r at x-block r ÷ PY + 1, y-block r % PY + 1.
 const CPD = parse(Int, get(ENV, "MAB_CELLS_PER_DEGREE", "60"))
 const PX = parse(Int, get(ENV, "MAB_PARTITION_X", "7")); const PY = parse(Int, get(ENV, "MAB_PARTITION_Y", "4"))
-Nx, Ny = round(Int, (12 - 4 / 12) * CPD), round(Int, (8 - 4 / 12) * CPD)
+const REGIONS = Dict("mab" => ((-76.0, -64.0), (34.0, 42.0)), "mabx" => ((-76.0, -56.0), (34.0, 46.0)))
+const data_λ, data_φ = REGIONS[get(ENV, "MAB_REGION", "mab")]
+Nx = round(Int, (data_λ[2] - data_λ[1] - 4 / 12) * CPD); Ny = round(Int, (data_φ[2] - data_φ[1] - 4 / 12) * CPD)
 const NXR, NYR = Nx ÷ PX, Ny ÷ PY
-λm = [-76 + 2 / 12 + (i - 0.5) / CPD for i in 1:Nx]
-φm = [34 + 2 / 12 + (j - 0.5) / CPD for j in 1:Ny]
+λm = [data_λ[1] + 2 / 12 + (i - 0.5) / CPD for i in 1:Nx]
+φm = [data_φ[1] + 2 / 12 + (j - 0.5) / CPD for j in 1:Ny]
 const VIDEO = get(ENV, "RING_VIDEO", "true") == "true"
 const MODEL_NAME = get(ENV, "RING_MODEL_NAME", "model")
 
@@ -377,7 +379,7 @@ pathstats(P) = ([mean(filter(isfinite, P[I, :])) for I in 1:Nλ], [std(filter(is
 println("\nGulf Stream path latitude over the comparison period, by 2° of longitude (mean / standard deviation, °N):")
 for name in ("model", "GLORYS", "satellite")
     m, s = pathstats(paths[name])
-    bins = [(lo, findall(I -> inbox[I] && lo <= λs[I] < lo + 2, 1:Nλ)) for lo in -76:2:-66]
+    bins = [(lo, findall(I -> inbox[I] && lo <= λs[I] < lo + 2, 1:Nλ)) for lo in round(Int, data_λ[1]):2:round(Int, data_λ[2])-2]
     println(rpad("  " * name, 12), join([@sprintf("%d..%dE %.2f/%.2f", lo, lo + 2, mean(m[ix]), mean(s[ix])) for (lo, ix) in bins if !isempty(ix)], "   "))
 end
 
@@ -563,7 +565,7 @@ srings = @lift ringlines(sd_rings[$k]); swr = @lift ringlines(sw_rings[yk($k)])
 title = @lift @sprintf("De-tided SSH and warm-core rings  %s (day %d)", cdays[$k], Dates.value(cdays[$k] - Date(2019, 4, 1)))
 fig = Figure(size = (2400, 700), fontsize = 18)
 Label(fig[0, 1:4], title, fontsize = 22)
-lims = ((-80, -52), (32, 44.5))
+lims = ((-80, -52), (32, 45))
 a1 = Axis(fig[1, 1], aspect = DataAspect(), title = "$MODEL_NAME (1/$(CPD)°)", limits = lims)
 a2 = Axis(fig[1, 2], aspect = DataAspect(), title = "GLORYS (1/12°)", limits = lims)
 a3 = Axis(fig[1, 3], aspect = DataAspect(), title = "satellite altimetry (DUACS L4, 1/8°)", limits = lims)

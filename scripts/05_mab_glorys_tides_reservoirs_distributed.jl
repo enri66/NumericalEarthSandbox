@@ -100,10 +100,13 @@ const Z_BOTTOM = parse(Float64, get(ENV, "MAB_ZBOTTOM", "5500"))
 const LAND_FRACTION = parse(Float64, get(ENV, "MAB_LAND_FRACTION", "0"))
 
 const n_pad      = 2                       # GLORYS cells between the GLORYS box and the model's open boundaries
-# MAB_REGION: the GLORYS box (what is on disk), "mab" (default, 76–64°W, 34–42°N) or "gsl" (the Gulf of St. Lawrence
-# and the Newfoundland–Labrador shelf, 71.5–48°W, 45–56°N, for the sea-ice runs; see HANDOFF_SEA_ICE.md)
-const REGIONS = Dict("mab" => ((-76.0, -64.0), (34.0, 42.0)),
-                     "gsl" => ((-71.5, -48.0), (45.0, 56.0)))
+# MAB_REGION: the GLORYS box (what is on disk), "mab" (default, 76–64°W, 34–42°N), "mabx" (76–56°W, 34–46°N: the MAB
+# with the Gulf Stream's warm-core ring formation region east of 64°W, the Gulf of Maine, the Bay of Fundy and the Scotian
+# Shelf) or "gsl" (the Gulf of St. Lawrence and the Newfoundland–Labrador shelf, 71.5–48°W, 45–56°N, for the sea-ice
+# runs; see HANDOFF_SEA_ICE.md)
+const REGIONS = Dict("mab"  => ((-76.0, -64.0), (34.0, 42.0)),
+                     "mabx" => ((-76.0, -56.0), (34.0, 46.0)),
+                     "gsl"  => ((-71.5, -48.0), (45.0, 56.0)))
 const REGION = get(ENV, "MAB_REGION", "mab")
 haskey(REGIONS, REGION) || error("MAB_REGION must be one of $(join(sort(collect(keys(REGIONS))), ", ")), got $REGION")
 const data_λ, data_φ = REGIONS[REGION]
@@ -959,9 +962,9 @@ IMPLICIT_DRAG || say("bottom drag: explicit")
 # pulls salinity back toward GLORYS and so works against the rivers: turn it down or off together with them.
 const RIVERS = get(ENV, "MAB_RIVERS", "false") == "true"
 const RIVER_MIXING_DEPTH = parse(Float64, get(ENV, "MAB_RIVER_MIXING_DEPTH", "10"))
-# MAB_RIVER_EXTRA (default true in the MAB region) adds the Hudson and the Delaware by hand: GloFAS's automatic mouth
+# MAB_RIVER_EXTRA (default true in the MAB regions) adds the Hudson and the Delaware by hand: GloFAS's automatic mouth
 # detection misses them (see glofas_land.jl)
-const RIVER_EXTRA = get(ENV, "MAB_RIVER_EXTRA", string(REGION == "mab")) == "true"
+const RIVER_EXTRA = get(ENV, "MAB_RIVER_EXTRA", string(REGION in ("mab", "mabx"))) == "true"
 # MAB_SSS_RIVER_MASK="r_in,r_out" (km; with surface salinity restoring, rivers on or off): no restoring within r_in of a river mouth
 # carrying at least MAB_SSS_RIVER_QMIN m³/s on the first day, full restoring beyond r_out, a cos² ramp between, so that the
 # plumes are not restored away while the restoring still holds the open shelf, the slope and the deep water
