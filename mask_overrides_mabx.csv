@@ -2,3 +2,7 @@
 # Layout (mask_cleanup.jl): action,i,j for one cell, or action,lon0,lon1,lat0,lat1 for the cells whose centres are in the box.
 # The head of Chignecto Bay, 64.54°W 45.79°N: at 1/12° a single 10 m cell on the north open boundary
 land,-64.56,-64.52,45.77,45.81
+# The one-cell-wide channel left above it (upper Chignecto Bay, 64.79–64.54°W 45.54–45.71°N), a dead end once the head is land
+land,-64.80,-64.70,45.53,45.55
+land,-64.72,-64.61,45.62,45.64
+land,-64.63,-64.53,45.70,45.72
