@@ -9,6 +9,7 @@
 #
 # Install on antares:  ln -s ~/Models/NumericalEarthSandbox/scripts/claude-session ~/bin/claude-session
 # Detach with Ctrl-b d; Claude keeps running. Run claude-session again to reattach.
+# Full walkthrough: scripts/claude-session.md
 
 NAME=claude
 DIR=${CLAUDE_SESSION_DIR:-~/Models/NumericalEarthSandbox}
