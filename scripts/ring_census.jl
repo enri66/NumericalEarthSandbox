@@ -97,8 +97,11 @@ dλ, dφ = λs[2] - λs[1], φs[2] - φs[1]
 # ---------------- the model on the altimetry grid ----------------
 cellI(λ) = floor(Int, (λ - (λs[1] - dλ / 2)) / dλ) + 1
 cellJ(φ) = floor(Int, (φ - (φs[1] - dφ / 2)) / dφ) + 1
+# model cells beyond the altimetry grid (north of 45°N in "mabx") are left out
+onsat(i, j) = 1 <= cellI(λm[i]) <= Nλ && 1 <= cellJ(φm[j]) <= Nφ
 ntot = zeros(Int, Nλ, Nφ); nwet = zeros(Int, Nλ, Nφ)
 for j in 1:Ny, i in 1:Nx
+    onsat(i, j) || continue
     I, J = cellI(λm[i]), cellJ(φm[j]); ntot[I, J] += 1; wet[i, j] && (nwet[I, J] += 1)
 end
 # an altimetry cell is in the model domain when it holds (nearly) its full share of model cells, and wet when half of them are
@@ -107,7 +110,7 @@ mvalid = (ntot .>= full) .& (nwet .* 2 .>= ntot)
 function binned(h)
     s = zeros(Nλ, Nφ); c = zeros(Int, Nλ, Nφ)
     for j in 1:Ny, i in 1:Nx
-        (wet[i, j] && isfinite(h[i, j])) || continue
+        (wet[i, j] && isfinite(h[i, j]) && onsat(i, j)) || continue
         I, J = cellI(λm[i]), cellJ(φm[j]); s[I, J] += h[i, j]; c[I, J] += 1
     end
     return [mvalid[I, J] && c[I, J] > 0 ? s[I, J] / c[I, J] : NaN for I in 1:Nλ, J in 1:Nφ]
