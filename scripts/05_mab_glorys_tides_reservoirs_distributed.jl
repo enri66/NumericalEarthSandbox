@@ -541,27 +541,42 @@ const H_west  = [min(-bh[1, j], Z_BOTTOM) for j in 1:Nφ];   const H_east  = [mi
 const H_south = [min(-bh[i, 1], Z_BOTTOM) for i in 1:Nλ];   const H_north = [min(-bh[i, end], Z_BOTTOM) for i in 1:Nλ]
 @inline column_stretching(H, η) = ZSTAR && H > 0 ? (H + η) / H : 1.0
 
+# MAB_IB=true: add the inverse-barometer sea level -(pₐ - p_ref) / (ρ₀ g) to the exterior sea level of the Flather
+# condition and to the initial sea level. GLORYS is not forced by atmospheric pressure, while the model is forced by
+# ERA5's pressure gradients through NumericalEarth's barotropic potential Φ = pₐ / ρ₀; without this term the open
+# boundaries hold the sea level at GLORYS's, away from its isostatic response to each weather system. pₐ is read from
+# that potential in the cell next to the boundary, so it is the pressure the model is forced with at that time,
+# including right after a restart. p_ref (MAB_IB_PREF, Pa) is a fixed reference for the pressure over the world ocean,
+# not the domain mean: a high over the whole region lowers its sea level by water leaving through the open boundaries.
+const IB = get(ENV, "MAB_IB", "false") == "true"
+const IB_PREF = parse(Float64, get(ENV, "MAB_IB_PREF", "101325"))
+const IB_STATE = Ref{Any}(nothing)   # (potential data, p_ref / ρ₀, g), set once the coupled model exists
+@inline ib_eta(i, j) = ib_eta(IB_STATE[], i, j)
+@inline ib_eta(::Nothing, i, j) = 0.0
+@inline ib_eta(state::Tuple, i, j) = -(@inbounds(state[1][i, j, 1]) - state[2]) / state[3]
+
 # The `*_g` functions take the WHOLE-DOMAIN index s along the boundary (j for west/east, i for south/north); the
-# functions the model calls receive this rank's LOCAL index, so they add the rank's offset first.
+# functions the model calls receive this rank's LOCAL index, so they add the rank's offset first. The inverse-barometer
+# term is read at this rank's local cell next to the boundary.
 function U_west_g(j, k, grid, clock, f)
     Us, ηsub = lerp_slab(tU, U_lo, j, clock.time), lerp_slab(tU, η_w, j, clock.time)
     Ut, ηt = tidal_UV_eta(west_U_const, west_η_const, harmonics, clock.time, j)
-    return (Us * column_stretching(H_west[j], ηsub) + Ut, ηsub + ηt)
+    return (Us * column_stretching(H_west[j], ηsub) + Ut, ηsub + ηt + ib_eta(1, j - J_OFF))
 end
 function U_east_g(j, k, grid, clock, f)
     Us, ηsub = lerp_slab(tU, U_hi, j, clock.time), lerp_slab(tU, η_e, j, clock.time)
     Ut, ηt = tidal_UV_eta(east_U_const, east_η_const, harmonics, clock.time, j)
-    return (Us * column_stretching(H_east[j], ηsub) + Ut, ηsub + ηt)
+    return (Us * column_stretching(H_east[j], ηsub) + Ut, ηsub + ηt + ib_eta(grid.Nx, j - J_OFF))
 end
 function V_south_g(i, k, grid, clock, f)
     Vs, ηsub = lerp_slab(tV, V_lo, i, clock.time), lerp_slab(tV, η_s, i, clock.time)
     Vt, ηt = tidal_UV_eta(south_V_const, south_η_const, harmonics, clock.time, i)
-    return (Vs * column_stretching(H_south[i], ηsub) + Vt, ηsub + ηt)
+    return (Vs * column_stretching(H_south[i], ηsub) + Vt, ηsub + ηt + ib_eta(i - I_OFF, 1))
 end
 function V_north_g(i, k, grid, clock, f)
     Vs, ηsub = lerp_slab(tV, V_hi, i, clock.time), lerp_slab(tV, η_n, i, clock.time)
     Vt, ηt = tidal_UV_eta(north_V_const, north_η_const, harmonics, clock.time, i)
-    return (Vs * column_stretching(H_north[i], ηsub) + Vt, ηsub + ηt)
+    return (Vs * column_stretching(H_north[i], ηsub) + Vt, ηsub + ηt + ib_eta(i - I_OFF, grid.Ny))
 end
 U_west(j, k, grid, clock, f)  = U_west_g(j + J_OFF, k, grid, clock, f)
 U_east(j, k, grid, clock, f)  = U_east_g(j + J_OFF, k, grid, clock, f)
@@ -1137,6 +1152,28 @@ radiation  = ERA5PrescribedRadiation(;  start_date, end_date = stop_date, region
 # the river discharge reaches the ocean only with MAB_RIVERS (the land is also built for MAB_SSS_RIVER_MASK's mouth positions)
 model = SEA_ICE ? OceanSeaIceModel(ocean, sea_ice; atmosphere, radiation, land = RIVERS ? land : nothing) :
                   OceanOnlyModel(ocean; atmosphere, radiation, land = RIVERS ? land : nothing)
+
+# MAB_IB: the potential is filled when the coupled model is built. On a fresh start the initial sea level gets the same
+# inverse-barometer term as the boundaries; after a restart the checkpointed sea level already has it.
+if IB
+    Φ = NumericalEarth.Oceans.forcing_barotropic_potential(ocean)
+    isnothing(Φ) && error("MAB_IB=true needs the ocean's barotropic pressure potential, which this ocean does not have")
+    ρ₀ = model.interfaces.ocean_properties.reference_density
+    g  = ocean.model.free_surface.gravitational_acceleration
+    IB_STATE[] = (Φ, IB_PREF / ρ₀, g)
+    # wet cells only (bh is the whole-domain bottom height): land columns keep their sea level
+    ηIB = [bh[I_OFF + i, J_OFF + j] < 0 ? ib_eta(i, j) : 0.0 for i in 1:size(grid, 1), j in 1:size(grid, 2)]
+    if get(ENV, "MAB_PICKUP", "false") == "false"
+        η₀ = ocean.model.free_surface.displacement
+        interior(η₀)[:, :, 1] .+= ηIB
+        Oceananigans.BoundaryConditions.fill_halo_regions!(η₀)
+        Oceananigans.TimeSteppers.update_state!(model)
+    end
+    ηIB_min, ηIB_max = allmin(minimum(ηIB)), allmax(maximum(ηIB))
+    say(@sprintf("inverse barometer: p_ref = %.1f hPa, η_IB at the start %.3f to %.3f m%s", IB_PREF / 100, ηIB_min, ηIB_max,
+                 get(ENV, "MAB_PICKUP", "false") == "false" ? ", added to the initial sea level" : ""))
+end
+
 simulation = Simulation(model; Δt = Δt_baroclinic, stop_time = sim_days * days, stop_iteration = STOP_ITERATION)
 SEA_ICE && add_callback!(simulation, restore_sea_ice!, IterationInterval(1))
 
