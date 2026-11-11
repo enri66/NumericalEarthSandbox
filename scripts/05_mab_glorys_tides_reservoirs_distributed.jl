@@ -557,26 +557,27 @@ const IB_STATE = Ref{Any}(nothing)   # (potential data, p_ref / ρ₀, g), set o
 
 # The `*_g` functions take the WHOLE-DOMAIN index s along the boundary (j for west/east, i for south/north); the
 # functions the model calls receive this rank's LOCAL index, so they add the rank's offset first. The inverse-barometer
-# term is read at this rank's local cell next to the boundary.
+# term is read at this rank's local cell next to the boundary, clamped to the rank's interior: the boundary fills also
+# run over the halo points along the boundary, and the potential's halos are never filled (zero there would be +10 m).
 function U_west_g(j, k, grid, clock, f)
     Us, ηsub = lerp_slab(tU, U_lo, j, clock.time), lerp_slab(tU, η_w, j, clock.time)
     Ut, ηt = tidal_UV_eta(west_U_const, west_η_const, harmonics, clock.time, j)
-    return (Us * column_stretching(H_west[j], ηsub) + Ut, ηsub + ηt + ib_eta(1, j - J_OFF))
+    return (Us * column_stretching(H_west[j], ηsub) + Ut, ηsub + ηt + ib_eta(1, clamp(j - J_OFF, 1, grid.Ny)))
 end
 function U_east_g(j, k, grid, clock, f)
     Us, ηsub = lerp_slab(tU, U_hi, j, clock.time), lerp_slab(tU, η_e, j, clock.time)
     Ut, ηt = tidal_UV_eta(east_U_const, east_η_const, harmonics, clock.time, j)
-    return (Us * column_stretching(H_east[j], ηsub) + Ut, ηsub + ηt + ib_eta(grid.Nx, j - J_OFF))
+    return (Us * column_stretching(H_east[j], ηsub) + Ut, ηsub + ηt + ib_eta(grid.Nx, clamp(j - J_OFF, 1, grid.Ny)))
 end
 function V_south_g(i, k, grid, clock, f)
     Vs, ηsub = lerp_slab(tV, V_lo, i, clock.time), lerp_slab(tV, η_s, i, clock.time)
     Vt, ηt = tidal_UV_eta(south_V_const, south_η_const, harmonics, clock.time, i)
-    return (Vs * column_stretching(H_south[i], ηsub) + Vt, ηsub + ηt + ib_eta(i - I_OFF, 1))
+    return (Vs * column_stretching(H_south[i], ηsub) + Vt, ηsub + ηt + ib_eta(clamp(i - I_OFF, 1, grid.Nx), 1))
 end
 function V_north_g(i, k, grid, clock, f)
     Vs, ηsub = lerp_slab(tV, V_hi, i, clock.time), lerp_slab(tV, η_n, i, clock.time)
     Vt, ηt = tidal_UV_eta(north_V_const, north_η_const, harmonics, clock.time, i)
-    return (Vs * column_stretching(H_north[i], ηsub) + Vt, ηsub + ηt + ib_eta(i - I_OFF, grid.Ny))
+    return (Vs * column_stretching(H_north[i], ηsub) + Vt, ηsub + ηt + ib_eta(clamp(i - I_OFF, 1, grid.Nx), grid.Ny))
 end
 U_west(j, k, grid, clock, f)  = U_west_g(j + J_OFF, k, grid, clock, f)
 U_east(j, k, grid, clock, f)  = U_east_g(j + J_OFF, k, grid, clock, f)
