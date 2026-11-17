@@ -397,6 +397,30 @@ end
 axislegend(axm, position = :lt)
 save(joinpath(OUTDIR, "gulf_stream_path.png"), fig)
 
+# the same month by month: mean path latitude and its spread, and the model's offset from the satellite path
+cmonths = unique([Date(year(d), month(d), 1) for d in cdays])
+println("\nGulf Stream path by month, averaged over the box less 0.5° (mean latitude / standard deviation, °N; model − satellite):")
+fig = Figure(size = (420 * min(4, length(cmonths)) + 60, 330 * cld(length(cmonths), 4) + 60), fontsize = 14)
+for (k, mon) in enumerate(cmonths)
+    cols = findall(d -> Date(year(d), month(d), 1) == mon, cdays)
+    ax = Axis(fig[cld(k, 4), mod1(k, 4)], title = "$(Dates.format(mon, "yyyy-mm")) ($(length(cols)) days)",
+              xlabel = "longitude", ylabel = "path latitude (°N)")
+    line = String[]
+    for (name, c) in (("model", :red), ("GLORYS", :blue), ("satellite", :black))
+        m, s = pathstats(paths[name][:, cols])
+        band!(ax, λs[inbox], m[inbox] .- s[inbox], m[inbox] .+ s[inbox]; color = (c, 0.15))
+        lines!(ax, λs[inbox], m[inbox]; color = c, linewidth = 2, label = name)
+        ok = inbox .& isfinite.(m)
+        push!(line, @sprintf("%s %.2f/%.2f", name, mean(m[ok]), mean(s[inbox .& isfinite.(s)])))
+    end
+    ms, _ = pathstats(paths["model"][:, cols]); ss, _ = pathstats(paths["satellite"][:, cols])
+    ok = inbox .& isfinite.(ms) .& isfinite.(ss)
+    @printf("  %s  %s   model − satellite %+.2f° (rms %.2f°)\n", Dates.format(mon, "yyyy-mm"), join(line, "  "),
+            mean(ms[ok] .- ss[ok]), sqrt(mean((ms[ok] .- ss[ok]) .^ 2)))
+    k == 1 && axislegend(ax, position = :lt)
+end
+save(joinpath(OUTDIR, "gulf_stream_path_monthly.png"), fig)
+
 # ---------------- curvature along the Gulf Stream axis ----------------
 # The axis is the longest contour at the Gulf Stream level, traced on the altimetry grid inside the model box, resampled every
 # 10 km and smoothed with a 25 km Gaussian (the same for all three, so the grid scale does not count as curvature); points within

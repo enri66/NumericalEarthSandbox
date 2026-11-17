@@ -9,12 +9,12 @@
 using CairoMakie
 include(joinpath(@__DIR__, "argo_common.jl"))
 
-const TAG      = get(ENV, "MAB_TAG", "mab_H90")
-const PREFIX   = run_prefix(TAG)
+const PREFIXES = run_prefixes()                       # MAB_TAG, or MAB_TAGS for a run in segments
+const PREFIX   = get(ENV, "MAB_OUT", PREFIXES[1])     # where the figure goes (a path prefix)
 const ARGO_DIR = get(ENV, "ARGO_DIR", joinpath(homedir(), "Data", "Argo", "mab"))
 
 rows = []
-for m in matched_argo_profiles(PREFIX, ARGO_DIR)
+for m in matched_argo_profiles(PREFIXES, ARGO_DIR)
     a_mld, a_tcl = column_depths(m.argo...)
     isfinite(a_mld) || continue
     m_mld, m_tcl = column_depths(m.model...)

@@ -98,6 +98,38 @@ function surface_series(path, name)
     return cat(frames...; dims = 3), times
 end
 
+# ---------------- runs restarted in segments ----------------
+# A run restarted from checkpoints writes its output in segments with different path prefixes. MAB_TAGS lists them in time
+# order, comma separated (otherwise MAB_TAG gives a single run). Each segment rewrites the output after its checkpoint, so
+# segment n is used up to the first output time of segment n + 1.
+run_prefixes() = haskey(ENV, "MAB_TAGS") ? String.(split(ENV["MAB_TAGS"], ",")) : [run_prefix(get(ENV, "MAB_TAG", "mab_H90"))]
+
+# the output times of one rank file of a segment (`suffix` such as "_surface_daily"), sorted
+function segment_times(prefix, suffix)
+    f = isfile(prefix * suffix * ".jld2") ? prefix * suffix * ".jld2" : prefix * suffix * "_rank0.jld2"
+    return sort(JLD2.jldopen(f) do file
+        [file["timeseries/t/$k"] for k in keys(file["timeseries/t"]) if k != "serialized"]
+    end)
+end
+
+# the time window (s) in which each segment is used: [its first output, the next segment's first output)
+function segment_windows(prefixes, suffix)
+    firsts = [first(segment_times(p, suffix)) for p in prefixes]
+    return [(firsts[n], n < length(prefixes) ? firsts[n+1] : Inf) for n in eachindex(prefixes)]
+end
+
+# surface_series over the segments, joined in time
+function joined_surface_series(prefixes, suffix, name)
+    windows = segment_windows(prefixes, suffix)
+    parts = map(eachindex(prefixes)) do n
+        A, t = surface_series(prefixes[n] * suffix * ".jld2", name)
+        keep = [k for k in sortperm(t) if windows[n][1] <= t[k] < windows[n][2]]
+        keep = keep[[k == length(keep) || t[keep[k+1]] > t[keep[k]] for k in eachindex(keep)]]
+        A[:, :, keep], t[keep]
+    end
+    return cat(first.(parts)...; dims = 3), vcat(last.(parts)...)
+end
+
 # ---------------- GLORYS ----------------
 gfile(var, date) = first(filter(x -> occursin("$(var)_GLORYSDaily_$(Dates.format(date, "yyyy-mm-dd"))T", x) &&
                                      endswith(x, "-76.0_-64.0_34.0_42.0.nc"), readdir(GDIR; join = true)))

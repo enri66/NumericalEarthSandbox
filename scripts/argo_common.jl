@@ -44,7 +44,13 @@ const region_names = ("shelf (<200 m)", "slope (200-1000 m)", "deep (>1000 m)")
 # Every Argo profile inside the run's grid and within a day of one of its daily frames, with the model's and GLORYS's
 # columns there: depths positive downward, T and S NaN below the bottom. `region` indexes region_names; `i`, `j` and
 # `frame` are the model cell and the volume_daily frame used.
-function matched_argo_profiles(prefix, argo_dir)
+# A run in segments (run_prefixes in mab_analysis_common.jl): each segment's matches inside its own time window.
+function matched_argo_profiles(prefixes::AbstractVector, argo_dir)
+    windows = segment_windows(prefixes, "_volume_daily")
+    return reduce(vcat, [matched_argo_profiles(prefixes[n], argo_dir; window = windows[n]) for n in eachindex(prefixes)])
+end
+
+function matched_argo_profiles(prefix, argo_dir; window = (-Inf, Inf))
     argo = read_argo(argo_dir)
     @printf("%d Argo profiles with good data, %s to %s\n", length(argo), first(argo).time, last(argo).time)
 
@@ -69,6 +75,7 @@ function matched_argo_profiles(prefix, argo_dir)
         d = Dates.value(prof.time - start_date) / 86_400_000          # days since the start, as a real number
         n = argmin(abs.(tdays .- d))
         abs(tdays[n] - d) <= 1 || continue                            # outside the run's daily frames
+        window[1] <= TV.times[n] < window[2] || continue              # another segment's days
         if current[:n] != n
             current[:T] = Array(interior(TV[n])); current[:S] = Array(interior(SV[n])); current[:n] = n
         end

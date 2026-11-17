@@ -12,8 +12,8 @@
 using CairoMakie
 include(joinpath(@__DIR__, "argo_common.jl"))
 
-const TAG      = get(ENV, "MAB_TAG", "mab_H90")
-const PREFIX   = run_prefix(TAG)
+const PREFIXES = run_prefixes()                       # MAB_TAG, or MAB_TAGS for a run in segments
+const PREFIX   = get(ENV, "MAB_OUT", PREFIXES[1])     # where the figure goes (a path prefix)
 const ARGO_DIR = get(ENV, "ARGO_DIR", joinpath(homedir(), "Data", "Argo", "mab"))
 const g, ρ₀, cₚ = 9.81, 1026.0, 3991.9
 const ZGRID = 0.0:1.0:300.0
@@ -44,7 +44,7 @@ function at10(depth, T, S)
 end
 
 rows = []
-for m in matched_argo_profiles(PREFIX, ARGO_DIR)
+for m in matched_argo_profiles(PREFIXES, ARGO_DIR)
     a_mld, _ = column_depths(m.argo...)
     isfinite(a_mld) || continue
     T10, S10 = at10(m.argo...)

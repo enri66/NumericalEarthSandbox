@@ -16,8 +16,8 @@ using CairoMakie
 include(joinpath(@__DIR__, "mab_analysis_common.jl"))
 const FFTW = Base.loaded_modules[only(id for id in keys(Base.loaded_modules) if id.name == "FFTW")]
 
-const TAG     = get(ENV, "MAB_TAG", "moor")
-const PREFIX  = run_prefix(TAG)
+const PREFIXES = run_prefixes()                      # MAB_TAG, or MAB_TAGS for a run in segments
+const PREFIX  = get(ENV, "MAB_OUT", PREFIXES[1])     # where the figure goes (a path prefix)
 const OOI_DIR = get(ENV, "OOI_DIR", joinpath(homedir(), "Data", "OOI", "pioneer"))
 const BAND    = (16.0, 22.0)                                   # near-inertial periods (hours)
 # storm windows, "label|start|end;…" (end exclusive)
@@ -56,9 +56,20 @@ function read_adcp(dataset)
 end
 
 # ---------------- model ----------------
+# A run in segments: each segment's records up to the next segment's first record
 function read_model(name)
-    for f in filter(f -> occursin(r"_moorings_rank\d+\.jld2$", f) && startswith(basename(f), basename(PREFIX) * "_moorings"),
-                    readdir(dirname(PREFIX); join = true))
+    parts = [read_model(prefix, name) for prefix in PREFIXES]
+    for n in 1:length(parts)-1
+        keep = parts[n].times .< first(parts[n+1].times)
+        parts[n] = merge(parts[n], (times = parts[n].times[keep], U = parts[n].U[:, keep], V = parts[n].V[:, keep]))
+    end
+    return merge(parts[1], (times = reduce(vcat, [p.times for p in parts]), U = reduce(hcat, [p.U for p in parts]),
+                            V = reduce(hcat, [p.V for p in parts])))
+end
+
+function read_model(prefix, name)
+    for f in filter(f -> occursin(r"_moorings_rank\d+\.jld2$", f) && startswith(basename(f), basename(prefix) * "_moorings"),
+                    readdir(dirname(prefix); join = true))
         out = JLD2.jldopen(f) do file
             haskey(file, name) || return nothing
             t0 = DateTime(file["start_date"])
@@ -68,7 +79,7 @@ function read_model(name)
         end
         isnothing(out) || return out
     end
-    error("no model column for $name")
+    error("no model column for $name in $prefix")
 end
 
 # ---------------- processing ----------------
