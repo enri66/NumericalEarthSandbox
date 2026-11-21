@@ -378,6 +378,13 @@ census("satellite, 80-52W", yday, sat, widevalid; detector = cold_core_rings)
 paths = Dict(name => reduce(hcat, [gulf_stream_path(masked(f(d), mvalid)) for d in cdays])
              for (name, f) in (("model", model_field), ("GLORYS", glorys), ("satellite", sat)))
 inbox = [dom_λ[1] + 0.5 <= λs[I] <= dom_λ[2] - 0.5 for I in 1:Nλ]
+# every daily path inside the box less 0.5°, for comparing runs (date, source, longitude, latitude)
+open(joinpath(OUTDIR, "gulf_stream_paths.csv"), "w") do io
+    println(io, "date,source,longitude,latitude")
+    for (name, P) in paths, (n, d) in enumerate(cdays), I in 1:Nλ
+        inbox[I] && isfinite(P[I, n]) && @printf(io, "%s,%s,%.4f,%.4f\n", d, name, λs[I], P[I, n])
+    end
+end
 pathstats(P) = ([mean(filter(isfinite, P[I, :])) for I in 1:Nλ], [std(filter(isfinite, P[I, :])) for I in 1:Nλ])
 println("\nGulf Stream path latitude over the comparison period, by 2° of longitude (mean / standard deviation, °N):")
 for name in ("model", "GLORYS", "satellite")
